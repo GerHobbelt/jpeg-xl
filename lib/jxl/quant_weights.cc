@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <hwy/aligned_allocator.h>
 #include <limits>
 #include <utility>
 
@@ -1143,7 +1144,8 @@ Status DequantMatrices::Compute() {
     HWY_ALIGN_MAX float inv_table[kTotalTableSize];
   };
 
-  static const DefaultMatrices default_matrices;
+  static const DefaultMatrices& default_matrices =
+      *hwy::MakeUniqueAligned<DefaultMatrices>().release();
 
   JXL_ASSERT(encodings_.size() == kNum);
 
