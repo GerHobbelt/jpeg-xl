@@ -20,7 +20,7 @@
 #include "lib/jxl/base/compiler_specific.h"
 #include "lib/jxl/base/status.h"
 
-#if HWY_COMPILER_MSVC
+#if JXL_COMPILER_MSVC
 #include <intrin.h>
 #endif
 
@@ -52,8 +52,10 @@ static JXL_INLINE JXL_MAYBE_UNUSED size_t PopCount(SizeTag<8> /* tag */,
                                                    const uint64_t x) {
 #if JXL_COMPILER_CLANG || JXL_COMPILER_GCC
   return static_cast<size_t>(__builtin_popcountll(x));
-#elif JXL_COMPILER_MSVC
+#elif JXL_COMPILER_MSVC && _WIN64
   return _mm_popcnt_u64(x);
+#elif JXL_COMPILER_MSVC
+  return _mm_popcnt_u32(uint32_t(x)) + _mm_popcnt_u32(uint32_t(x>>32));
 #else
 #error "not supported"
 #endif
@@ -68,7 +70,7 @@ static JXL_INLINE JXL_MAYBE_UNUSED size_t PopCount(T x) {
 static JXL_INLINE JXL_MAYBE_UNUSED size_t
 Num0BitsAboveMS1Bit_Nonzero(SizeTag<4> /* tag */, const uint32_t x) {
   JXL_DASSERT(x != 0);
-#if HWY_COMPILER_MSVC
+#if JXL_COMPILER_MSVC
   unsigned long index;
   _BitScanReverse(&index, x);
   return 31 - index;
@@ -79,12 +81,12 @@ Num0BitsAboveMS1Bit_Nonzero(SizeTag<4> /* tag */, const uint32_t x) {
 static JXL_INLINE JXL_MAYBE_UNUSED size_t
 Num0BitsAboveMS1Bit_Nonzero(SizeTag<8> /* tag */, const uint64_t x) {
   JXL_DASSERT(x != 0);
-#if HWY_COMPILER_MSVC
-#if HWY_ARCH_X86_64
+#if JXL_COMPILER_MSVC
+#if _WIN64
   unsigned long index;
   _BitScanReverse64(&index, x);
   return 63 - index;
-#else  // HWY_ARCH_X86_64
+#else  // _WIN64
   // _BitScanReverse64 not available
   uint32_t msb = static_cast<uint32_t>(x >> 32u);
   unsigned long index;
@@ -96,7 +98,7 @@ Num0BitsAboveMS1Bit_Nonzero(SizeTag<8> /* tag */, const uint64_t x) {
     _BitScanReverse(&index, msb);
     return 31 - index;
   }
-#endif  // HWY_ARCH_X86_64
+#endif  // _WIN64
 #else
   return static_cast<size_t>(__builtin_clzll(x));
 #endif
@@ -112,7 +114,7 @@ Num0BitsAboveMS1Bit_Nonzero(const T x) {
 static JXL_INLINE JXL_MAYBE_UNUSED size_t
 Num0BitsBelowLS1Bit_Nonzero(SizeTag<4> /* tag */, const uint32_t x) {
   JXL_DASSERT(x != 0);
-#if HWY_COMPILER_MSVC
+#if JXL_COMPILER_MSVC
   unsigned long index;
   _BitScanForward(&index, x);
   return index;
@@ -123,12 +125,12 @@ Num0BitsBelowLS1Bit_Nonzero(SizeTag<4> /* tag */, const uint32_t x) {
 static JXL_INLINE JXL_MAYBE_UNUSED size_t
 Num0BitsBelowLS1Bit_Nonzero(SizeTag<8> /* tag */, const uint64_t x) {
   JXL_DASSERT(x != 0);
-#if HWY_COMPILER_MSVC
-#if HWY_ARCH_X86_64
+#if JXL_COMPILER_MSVC
+#if _WIN64
   unsigned long index;
   _BitScanForward64(&index, x);
   return index;
-#else  // HWY_ARCH_X86_64
+#else  // _WIN64
   // _BitScanForward64 not available
   uint32_t lsb = static_cast<uint32_t>(x & 0xFFFFFFFF);
   unsigned long index;
@@ -140,7 +142,7 @@ Num0BitsBelowLS1Bit_Nonzero(SizeTag<8> /* tag */, const uint64_t x) {
     _BitScanForward(&index, lsb);
     return index;
   }
-#endif  // HWY_ARCH_X86_64
+#endif  // _WIN64
 #else
   return static_cast<size_t>(__builtin_ctzll(x));
 #endif
