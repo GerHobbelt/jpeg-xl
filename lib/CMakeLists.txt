@@ -13,7 +13,7 @@
 # limitations under the License.
 
 set(JPEGXL_MAJOR_VERSION 0)
-set(JPEGXL_MINOR_VERSION 2)
+set(JPEGXL_MINOR_VERSION 3)
 set(JPEGXL_PATCH_VERSION 0)
 set(JPEGXL_LIBRARY_VERSION
     "${JPEGXL_MAJOR_VERSION}.${JPEGXL_MINOR_VERSION}.${JPEGXL_PATCH_VERSION}")
@@ -95,7 +95,6 @@ if (WIN32)
   )
 else()  # WIN32
   list(APPEND JPEGXL_INTERNAL_FLAGS
-    -fno-signed-char
     -fsized-deallocation
     -fno-exceptions
 
