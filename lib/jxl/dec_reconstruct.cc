@@ -790,7 +790,35 @@ Status FinalizeFrameDecoding(ImageBundle* decoded,
   }
 
   if (!skip_blending) {
-    JXL_RETURN_IF_ERROR(DoBlending(dec_state, decoded));
+    ImageBlender blender;
+    ImageBundle foreground = std::move(*decoded);
+    JXL_RETURN_IF_ERROR(
+        blender.PrepareBlending(dec_state, &foreground, /*output=*/decoded));
+
+    std::vector<Rect> rects_to_process;
+    for (size_t y = 0; y < frame_dim.ysize; y += kGroupDim) {
+      for (size_t x = 0; x < frame_dim.xsize; x += kGroupDim) {
+        Rect rect(x, y, kGroupDim, kGroupDim, frame_dim.xsize, frame_dim.ysize);
+        if (rect.xsize() == 0 || rect.ysize() == 0) continue;
+        rects_to_process.push_back(rect);
+      }
+    }
+
+    std::atomic<bool> blending_ok{true};
+    JXL_RETURN_IF_ERROR(RunOnPool(
+        pool, 0, rects_to_process.size(), ThreadPool::SkipInit(),
+        [&](size_t i, size_t /*thread*/) {
+          const Rect& rect = rects_to_process[i];
+          const auto rect_blender = blender.PrepareRect(rect, foreground);
+          for (size_t y = 0; y < rect.ysize(); ++y) {
+            if (!rect_blender.DoBlending(y)) {
+              blending_ok = false;
+              return;
+            }
+          }
+        },
+        "Blend"));
+    JXL_RETURN_IF_ERROR(blending_ok.load());
   }
 
   return true;

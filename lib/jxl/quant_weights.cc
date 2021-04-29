@@ -18,7 +18,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <hwy/aligned_allocator.h>
 #include <limits>
 #include <utility>
 

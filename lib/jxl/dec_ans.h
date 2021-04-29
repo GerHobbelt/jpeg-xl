@@ -26,11 +26,13 @@
 
 #include "lib/jxl/ans_common.h"
 #include "lib/jxl/ans_params.h"
+#include "lib/jxl/base/bits.h"
 #include "lib/jxl/base/byte_order.h"
 #include "lib/jxl/base/cache_aligned.h"
 #include "lib/jxl/base/compiler_specific.h"
 #include "lib/jxl/dec_bit_reader.h"
 #include "lib/jxl/dec_huffman.h"
+#include "lib/jxl/field_encodings.h"
 
 namespace jxl {
 
@@ -275,7 +277,7 @@ class ANSSymbolReader {
                  low;
     // TODO(eustas): mark BitReader as unhealthy if nbits > 29 or ret does not
     //               fit uint32_t
-    return ret;
+    return static_cast<uint32_t>(ret);
   }
 
   // Takes a *clustered* idx.
