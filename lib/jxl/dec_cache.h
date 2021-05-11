@@ -66,6 +66,7 @@ struct PassesDecoderState {
 
   // Decoded image.
   Image3F decoded;
+  std::vector<ImageF> extra_channels;
 
   // Borders between groups. Only allocated if `decoded` is *not* allocated.
   // We also store the extremal borders for simplicity. Horizontal borders are
@@ -77,14 +78,24 @@ struct PassesDecoderState {
 
   // RGB8 output buffer. If not nullptr, image data will be written to this
   // buffer instead of being written to the output ImageBundle. The image data
-  // is assumed to be contiguous, hence row `i` starts at position `image_xsize
-  // * i * 3`.
+  // is assumed to have the stride given by `rgb_stride`, hence row `i` starts
+  // at position `i * rgb_stride`.
   uint8_t* rgb_output;
+  size_t rgb_stride = 0;
+
   // Whether to use int16 float-XYB-to-uint8-srgb conversion.
   bool fast_xyb_srgb8_conversion;
 
-  // If true, rgb_output is RGBA using 4 instead of 3 bytes per pixel.
+  // If true, rgb_output or callback output is RGBA using 4 instead of 3 bytes
+  // per pixel.
   bool rgb_output_is_rgba;
+
+  // Callback for line-by-line output.
+  std::function<void(const float*, size_t, size_t, size_t)> pixel_callback;
+  // Buffer of upsampling * kApplyImageFeaturesTileDim ones.
+  std::vector<float> opaque_alpha;
+  // One row per thread
+  std::vector<std::vector<float>> pixel_callback_rows;
 
   // Seed for noise, to have different noise per-frame.
   size_t noise_seed = 0;
@@ -106,9 +117,13 @@ struct PassesDecoderState {
   // Manages the status of borders.
   GroupBorderAssigner group_border_assigner;
 
+  // TODO(veluca): this should eventually become "iff no global modular
+  // transform was applied".
   bool EagerFinalizeImageRect() const {
     return shared->frame_header.chroma_subsampling.Is444() &&
-           shared->frame_header.encoding == FrameEncoding::kVarDCT;
+           shared->frame_header.encoding == FrameEncoding::kVarDCT &&
+           shared->frame_header.nonserialized_metadata->m.extra_channel_info
+               .empty();
   }
 
   // Amount of padding that will be accessed, in all directions, outside a rect
@@ -173,7 +188,7 @@ struct PassesDecoderState {
       ZeroFillImage(&group_data.back());
 #endif
     }
-    if (rgb_output) {
+    if (rgb_output || pixel_callback) {
       size_t log2_upsampling = CeilLog2Nonzero(shared->frame_header.upsampling);
       for (size_t _ = output_pixel_data_storage[log2_upsampling].size();
            _ < num_threads; _++) {
@@ -181,11 +196,21 @@ struct PassesDecoderState {
             kApplyImageFeaturesTileDim << log2_upsampling,
             kApplyImageFeaturesTileDim << log2_upsampling);
       }
+      opaque_alpha.resize(
+          kApplyImageFeaturesTileDim * shared->frame_header.upsampling, 1.0f);
+      if (pixel_callback) {
+        pixel_callback_rows.resize(num_threads);
+        for (size_t i = 0; i < pixel_callback_rows.size(); ++i) {
+          pixel_callback_rows[i].resize(kApplyImageFeaturesTileDim *
+                                        shared->frame_header.upsampling *
+                                        (rgb_output_is_rgba ? 4 : 3));
+        }
+      }
     }
   }
 
-  // Color encoding that will be used for output.
-  ColorEncoding output_encoding;
+  // Information for colour conversions.
+  OutputEncodingInfo output_encoding_info;
 
   // Initializes decoder-specific structures using information from *shared.
   void Init() {
@@ -194,20 +219,10 @@ struct PassesDecoderState {
     b_dm_multiplier =
         std::pow(1 / (1.25f), shared->frame_header.b_qm_scale - 2.0f);
 
-    output_encoding =
-        shared->frame_header.color_transform == ColorTransform::kXYB
-            ? ColorEncoding::LinearSRGB(
-                  shared->metadata->m.color_encoding.IsGray())
-            : shared->metadata->m.color_encoding;
     rgb_output = nullptr;
+    pixel_callback = nullptr;
     rgb_output_is_rgba = false;
     fast_xyb_srgb8_conversion = false;
-    // TODO(veluca): keep in sync with dec_reconstruct.cc.
-    if (shared->metadata->m.xyb_encoded &&
-        shared->frame_header.needs_color_transform() &&
-        shared->metadata->m.color_encoding.IsSRGB()) {
-      output_encoding = ColorEncoding::SRGB(output_encoding.IsGray());
-    }
     used_acs = 0;
 
     group_border_assigner.Init(shared->frame_dim);

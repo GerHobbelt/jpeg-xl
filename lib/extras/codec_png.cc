@@ -825,9 +825,9 @@ Status EncodeImagePNG(const CodecInOut* io, const ColorEncoding& c_desired,
   PaddedBytes raw_bytes(stride * ib.oriented_ysize());
   JXL_RETURN_IF_ERROR(ConvertToExternal(
       *transformed, bits_per_sample, /*float_out=*/false,
-      /*apply_srgb_tf=*/false, c_desired.Channels() + (ib.HasAlpha() ? 1 : 0),
-      JXL_BIG_ENDIAN, stride, pool, raw_bytes.data(), raw_bytes.size(),
-      metadata.GetOrientation()));
+      c_desired.Channels() + (ib.HasAlpha() ? 1 : 0), JXL_BIG_ENDIAN, stride,
+      pool, raw_bytes.data(), raw_bytes.size(), /*out_callback=*/nullptr,
+      /*out_opaque=*/nullptr, metadata.GetOrientation()));
 
   PNGState state;
   // For maximum compatibility, still store 8-bit even if pixels are all zero.

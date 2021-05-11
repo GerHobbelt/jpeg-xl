@@ -58,10 +58,6 @@ BlendingInfo::BlendingInfo() { Bundle::Init(this); }
 Status BlendingInfo::VisitFields(Visitor* JXL_RESTRICT visitor) {
   JXL_QUIET_RETURN_IF_ERROR(
       VisitBlendMode(visitor, BlendMode::kReplace, &mode));
-  if (mode == BlendMode::kAlphaWeightedAdd || mode == BlendMode::kMul) {
-    return JXL_FAILURE(
-        "Blend mode kAlphaWeightedAdd and kMul not supported yet");
-  }
   if (visitor->Conditional(nonserialized_has_multiple_extra_channels &&
                            (mode == BlendMode::kBlend ||
                             mode == BlendMode::kAlphaWeightedAdd))) {

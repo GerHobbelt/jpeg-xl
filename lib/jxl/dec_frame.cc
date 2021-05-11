@@ -429,25 +429,36 @@ void FrameDecoder::FinalizeDC() {
 
 void FrameDecoder::AllocateOutput() {
   const CodecMetadata& metadata = *frame_header_.nonserialized_metadata;
-  if (dec_state_->rgb_output != nullptr) return;
-  decoded_->SetFromImage(Image3F(frame_dim_.xsize_upsampled_padded,
-                                 frame_dim_.ysize_upsampled_padded),
-                         dec_state_->output_encoding);
+  if (dec_state_->rgb_output == nullptr && !dec_state_->pixel_callback) {
+    decoded_->SetFromImage(Image3F(frame_dim_.xsize_upsampled_padded,
+                                   frame_dim_.ysize_upsampled_padded),
+                           dec_state_->output_encoding_info.color_encoding);
+  }
+  dec_state_->extra_channels.clear();
   if (metadata.m.num_extra_channels > 0) {
-    std::vector<ImageF> ecv;
     for (size_t i = 0; i < metadata.m.num_extra_channels; i++) {
       const auto eci = metadata.m.extra_channel_info[i];
-      ecv.emplace_back(eci.Size(decoded_->xsize()),
-                       eci.Size(decoded_->ysize()));
+      dec_state_->extra_channels.emplace_back(
+          eci.Size(frame_dim_.xsize_upsampled_padded),
+          eci.Size(frame_dim_.ysize_upsampled_padded));
+#if MEMORY_SANITIZER
+      // Avoid errors due to loading vectors on the outermost padding.
+      for (size_t y = 0; y < eci.Size(frame_dim_.ysize_upsampled_padded); y++) {
+        for (size_t x = eci.Size(frame_dim_.xsize_upsampled);
+             x < eci.Size(frame_dim_.xsize_upsampled_padded); x++) {
+          dec_state_->extra_channels.back().Row(y)[x] = 0;
+        }
+      }
+#endif
     }
-    decoded_->SetExtraChannels(std::move(ecv));
   }
   decoded_->origin = dec_state_->shared->frame_header.frame_origin;
 }
 
 Status FrameDecoder::ProcessACGlobal(BitReader* br) {
   JXL_CHECK(finalized_dc_);
-  JXL_CHECK(decoded_->HasColor() || dec_state_->rgb_output != nullptr);
+  JXL_CHECK(decoded_->HasColor() || dec_state_->rgb_output != nullptr ||
+            !!dec_state_->pixel_callback);
 
   // Decode AC group.
   if (frame_header_.encoding == FrameEncoding::kVarDCT) {
@@ -532,8 +543,8 @@ Status FrameDecoder::ProcessACGlobal(BitReader* br) {
   // Set memory buffer for pre-color-transform frame, if needed.
   if (frame_header_.needs_color_transform() &&
       frame_header_.save_before_color_transform) {
-    dec_state_->pre_color_transform_frame =
-        Image3F(frame_dim_.xsize_upsampled_padded, frame_dim_.ysize_upsampled_padded);
+    dec_state_->pre_color_transform_frame = Image3F(
+        frame_dim_.xsize_upsampled_padded, frame_dim_.ysize_upsampled_padded);
   } else {
     // clear pre_color_transform_frame to ensure that previously moved-from
     // images are not used.
@@ -755,6 +766,12 @@ Status FrameDecoder::Flush() {
   // No early Flush() if blending is enabled.
   if (has_blending && !is_finalized_) {
     return false;
+  }
+  // No early Flush() - nothing to do - if the frame is a kSkipProgressive
+  // frame.
+  if (frame_header_.frame_type == FrameType::kSkipProgressive &&
+      !is_finalized_) {
+    return true;
   }
   if (decoded_->IsJPEG()) {
     // Nothing to do.
