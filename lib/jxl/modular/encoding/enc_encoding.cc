@@ -179,9 +179,8 @@ Status EncodeModularChannelMAANS(const Image &image, pixel_type chan,
 
   JXL_DEBUG_V(6,
               "Encoding %zux%zu channel %d, "
-              "(shift=%i,%i, cshift=%i,%i)",
-              channel.w, channel.h, chan, channel.hshift, channel.vshift,
-              channel.hcshift, channel.vcshift);
+              "(shift=%i,%i)",
+              channel.w, channel.h, chan, channel.hshift, channel.vshift);
 
   std::array<pixel_type, kNumStaticProperties> static_props = {chan,
                                                                (int)group_id};
@@ -235,6 +234,25 @@ Status EncodeModularChannelMAANS(const Image &image, pixel_type chan,
         int32_t residual = r[x] - guess - offsets[pos];
         tokens->emplace_back(ctx_id, PackSigned(residual));
         wp_state.UpdateErrors(r[x], x, y, channel.w);
+      }
+    }
+  } else if (tree.size() == 1 && tree[0].predictor == Predictor::Gradient &&
+             tree[0].multiplier == 1 && tree[0].predictor_offset == 0 &&
+             !skip_encoder_fast_path) {
+    for (size_t c = 0; c < 3; c++) {
+      FillImage(static_cast<float>(PredictorColor(Predictor::Gradient)[c]),
+                &predictor_img.Plane(c));
+    }
+    const intptr_t onerow = channel.plane.PixelsPerRow();
+    for (size_t y = 0; y < channel.h; y++) {
+      const pixel_type *JXL_RESTRICT r = channel.Row(y);
+      for (size_t x = 0; x < channel.w; x++) {
+        pixel_type_w left = (x ? r[x - 1] : y ? *(r + x - onerow) : 0);
+        pixel_type_w top = (y ? *(r + x - onerow) : left);
+        pixel_type_w topleft = (x && y ? *(r + x - 1 - onerow) : left);
+        int32_t guess = ClampedGradient(top, left, topleft);
+        int32_t residual = r[x] - guess;
+        tokens->emplace_back(tree[0].childID, PackSigned(residual));
       }
     }
   } else if (is_gradient_only && !skip_encoder_fast_path) {
@@ -370,13 +388,8 @@ Status ModularEncode(const Image &image, const ModularOptions &options,
                      size_t *width) {
   if (image.error) return JXL_FAILURE("Invalid image");
   size_t nb_channels = image.channel.size();
-  int bit_depth = 1, maxval = 1;
-  while (maxval < image.maxval) {
-    bit_depth++;
-    maxval = maxval * 2 + 1;
-  }
   JXL_DEBUG_V(2, "Encoding %zu-channel, %i-bit, %zux%zu image.", nb_channels,
-              bit_depth, image.w, image.h);
+              image.bitdepth, image.w, image.h);
 
   if (nb_channels < 1) {
     return true;  // is there any use for a zero-channel image?
@@ -525,8 +538,9 @@ Status ModularGenericCompress(Image &image, const ModularOptions &opts,
   bits = writer ? writer->BitsWritten() - bits : 0;
   if (writer) {
     JXL_DEBUG_V(
-        4, "Modular-encoded a %zux%zu maxval=%i nbchans=%zu image in %zu bytes",
-        image.w, image.h, image.maxval, image.real_nb_channels, bits / 8);
+        4,
+        "Modular-encoded a %zux%zu bitdepth=%i nbchans=%zu image in %zu bytes",
+        image.w, image.h, image.bitdepth, image.real_nb_channels, bits / 8);
   }
   (void)bits;
   return true;

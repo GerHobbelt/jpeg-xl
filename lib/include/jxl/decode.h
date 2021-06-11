@@ -150,6 +150,8 @@ typedef enum {
    * requested and it is possible to decode a DC image from the codestream and
    * the DC out buffer was not yet set. This event re-occurs for new frames
    * if there are multiple animation frames.
+   * DEPRECATED: the DC feature in this form will be removed. You can use
+   * JxlDecoderFlushImage for progressive rendering.
    */
   JXL_DEC_NEED_DC_OUT_BUFFER = 4,
 
@@ -214,6 +216,8 @@ typedef enum {
    * status only indicates we're past this point in the codestream. This event
    * occurs max once per frame and always later than JXL_DEC_FRAME_HEADER
    * and other header events and earlier than full resolution pixel data.
+   * DEPRECATED: the DC feature in this form will be removed. You can use
+   * JxlDecoderFlushImage for progressive rendering.
    */
   JXL_DEC_DC_IMAGE = 0x800,
 
@@ -235,6 +239,37 @@ typedef enum {
    */
   JXL_DEC_JPEG_RECONSTRUCTION = 0x2000,
 } JxlDecoderStatus;
+
+/** Rewinds decoder to the beginning. The same input must be given again from
+ * the beginning of the file and the decoder will emit events from the beginning
+ * again. When rewinding (as opposed to JxlDecoderReset), the decoder can keep
+ * state about the image, which it can use to skip to a requested frame more
+ * efficiently with JxlDecoderSkipFrames. After rewind,
+ * JxlDecoderSubscribeEvents can be used again, and it is feasible to leave out
+ * events that were already handled before, such as JXL_DEC_BASIC_INFO and
+ * JXL_DEC_COLOR_ENCODING, since they will provide the same information as
+ * before.
+ * @param dec decoder object
+ */
+JXL_EXPORT void JxlDecoderRewind(JxlDecoder* dec);
+
+/** Makes the decoder skip the next `amount` frames. It still needs to process
+ * the input, but will not output the frame events. It can be more efficient
+ * when skipping frames, and even more so when using this after
+ * JxlDecoderRewind. If the decoder is already processing a frame (could
+ * have emitted JXL_DEC_FRAME but not yet JXL_DEC_FULL_IMAGE), it starts
+ * skipping from the next frame. If the amount is larger than the amount of
+ * frames remaining in the image, all remaining frames are skipped. Calling this
+ * function multiple times adds the amount to skip to the already existing
+ * amount.
+ * A frame here is defined as a frame that without skipping emits events such as
+ * JXL_DEC_FRAME and JXL_FULL_IMAGE, frames that are internal to the file format
+ * but are not rendered as part of an animation, or are not the final still
+ * frame of a still image, are not counted.
+ * @param dec decoder object
+ * @param amount the amount of frames to skip
+ */
+JXL_EXPORT void JxlDecoderSkipFrames(JxlDecoder* dec, size_t amount);
 
 /**
  * Get the default pixel format for this decoder.
@@ -664,8 +699,11 @@ JXL_EXPORT JxlDecoderStatus JxlDecoderGetFrameName(const JxlDecoder* dec,
  * @param size output value, buffer size in bytes
  * @return JXL_DEC_SUCCESS on success, JXL_DEC_ERROR on error, such as
  *    information not available yet.
+ *
+ * DEPRECATED: the DC feature in this form will be removed. You can use
+ * JxlDecoderFlushImage for progressive rendering.
  */
-JXL_EXPORT JxlDecoderStatus JxlDecoderDCOutBufferSize(
+JXL_EXPORT JXL_DEPRECATED JxlDecoderStatus JxlDecoderDCOutBufferSize(
     const JxlDecoder* dec, const JxlPixelFormat* format, size_t* size);
 
 /**
@@ -682,8 +720,11 @@ JXL_EXPORT JxlDecoderStatus JxlDecoderDCOutBufferSize(
  * @param size size of buffer in bytes
  * @return JXL_DEC_SUCCESS on success, JXL_DEC_ERROR on error, such as
  * size too small.
+ *
+ * DEPRECATED: the DC feature in this form will be removed. You can use
+ * JxlDecoderFlushImage for progressive rendering.
  */
-JXL_EXPORT JxlDecoderStatus JxlDecoderSetDCOutBuffer(
+JXL_EXPORT JXL_DEPRECATED JxlDecoderStatus JxlDecoderSetDCOutBuffer(
     JxlDecoder* dec, const JxlPixelFormat* format, void* buffer, size_t size);
 
 /**

@@ -73,6 +73,7 @@ struct CompressArgs {
                             // or to VarDCT otherwise.
   bool progressive = false;
   bool default_settings = true;
+  bool force_premultiplied = false;
 
   // Will get passed on to AuxOut.
   jxl::InspectorImage3F inspector_image3f;
@@ -86,7 +87,7 @@ struct CompressArgs {
   CommandLineParser::OptionId opt_near_lossless_id = -1;
   CommandLineParser::OptionId opt_intensity_target_id = -1;
   CommandLineParser::OptionId opt_color_id = -1;
-  CommandLineParser::OptionId m_group_size_id = -1;
+  CommandLineParser::OptionId opt_m_group_size_id = -1;
 };
 
 jxl::Status LoadAll(CompressArgs& args, jxl::ThreadPoolInternal* pool,

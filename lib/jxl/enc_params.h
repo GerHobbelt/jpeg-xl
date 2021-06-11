@@ -43,7 +43,7 @@ enum class SpeedTier {
   // Modular: uses fixed tree with Gradient predictor.
   kThunder = 8,
   // VarDCT: same as kThunder.
-  // Modular: same as kThunder but with kFastest context clustering.
+  // Modular: no tree, Gradient predictor, fast histograms
   kLightning = 9
 };
 
@@ -168,8 +168,9 @@ struct CompressParams {
 
   int progressive_dc = -1;
 
-  // Ensure invisible pixels are not set to 0.
-  bool keep_invisible = false;
+  // If on: preserve color of invisible pixels (if off: don't care)
+  // Default: on for lossless, off for lossy
+  Override keep_invisible = Override::kDefault;
 
   // Progressive-mode saliency.
   //
@@ -217,7 +218,6 @@ struct CompressParams {
   float channel_colors_pre_transform_percent = 95.f;
   // Use Local channel palette if #colors < this percentage of range
   float channel_colors_percent = 80.f;
-  int near_lossless = 0;
   int palette_colors = 1 << 10;  // up to 10-bit palette is probably worthwhile
   bool lossy_palette = false;
 

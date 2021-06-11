@@ -360,6 +360,8 @@ cmake_configure() {
     -DJPEGXL_ENABLE_VIEWERS=ON
     -DJPEGXL_ENABLE_PLUGINS=ON
     -DJPEGXL_ENABLE_DEVTOOLS=ON
+    # We always use libfuzzer in the ci.sh wrapper.
+    -DJPEGXL_FUZZER_LINK_FLAGS="-fsanitize=fuzzer"
   )
   if [[ "${BUILD_TARGET}" != *mingw32 ]]; then
     args+=(
@@ -592,6 +594,27 @@ cmd_gbench() {
   )
 }
 
+cmd_asanfuzz() {
+  CMAKE_CXX_FLAGS+=" -fsanitize=fuzzer-no-link"
+  CMAKE_C_FLAGS+=" -fsanitize=fuzzer-no-link"
+  cmd_asan -DJPEGXL_ENABLE_FUZZERS=ON "$@"
+}
+
+cmd_msanfuzz() {
+  # Install msan if needed before changing the flags.
+  detect_clang_version
+  local msan_prefix="${HOME}/.msan/${CLANG_VERSION}"
+  if [[ ! -d "${msan_prefix}" || -e "${msan_prefix}/lib/libc++abi.a" ]]; then
+    # Install msan libraries for this version if needed or if an older version
+    # with libc++abi was installed.
+    cmd_msan_install
+  fi
+
+  CMAKE_CXX_FLAGS+=" -fsanitize=fuzzer-no-link"
+  CMAKE_C_FLAGS+=" -fsanitize=fuzzer-no-link"
+  cmd_msan -DJPEGXL_ENABLE_FUZZERS=ON "$@"
+}
+
 cmd_asan() {
   SANITIZER="asan"
   CMAKE_C_FLAGS+=" -DJXL_ENABLE_ASSERT=1 -g -DADDRESS_SANITIZER \
@@ -807,7 +830,7 @@ run_benchmark() {
 
   local benchmark_args=(
     --input "${src_img_dir}/*.png"
-    --codec=jpeg:yuv420:q85,webp:q80,jxl:fast:d1,jxl:fast:d1:downsampling=8,jxl:fast:d4,jxl:fast:d4:downsampling=8,jxl:m:cheetah:nl,jxl:cheetah:m,jxl:m:cheetah:P6,jxl:m:falcon:q80
+    --codec=jpeg:yuv420:q85,webp:q80,jxl:fast:d1,jxl:fast:d1:downsampling=8,jxl:fast:d4,jxl:fast:d4:downsampling=8,jxl:cheetah:m,jxl:m:cheetah:P6,jxl:m:falcon:q80
     --output_dir "${output_dir}"
     --noprofiler --show_progress
     --num_threads="${num_threads}"
@@ -906,7 +929,6 @@ cmd_arm_benchmark() {
     "--modular --responsive=1"
     # Near-lossless options:
     "--epf=0 --distance=0.3 --speed=fast"
-    "--modular -N 3 -I 0"
     "--modular -Q 97"
   )
 
@@ -1287,6 +1309,8 @@ Where cmd is one of:
  msan      Build and test an MSan (MemorySanitizer) build. Needs to have msan
            c++ libs installed with msan_install first.
  tsan      Build and test a TSan (ThreadSanitizer) build.
+ asanfuzz  Build and test an ASan (AddressSanitizer) build for fuzzing.
+ msanfuzz  Build and test an MSan (MemorySanitizer) build for fuzzing.
  test      Run the tests build by opt, debug, release, asan or msan. Useful when
            building with SKIP_TEST=1.
  gbench    Run the Google benchmark tests.

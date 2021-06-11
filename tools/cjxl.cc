@@ -339,7 +339,8 @@ void CompressArgs::AddCommandLineOptions(CommandLineParser* cmdline) {
   cmdline->AddOptionValue(
       's', "speed", "ANIMAL",
       "Deprecated synonym for --effort. Valid values are:\n"
-      "    lightning (1), thunder, falcon, cheetah, hare, wombat, squirrel, kitten, tortoise (9)\n"
+      "    lightning (1), thunder, falcon, cheetah, hare, wombat, squirrel, "
+      "kitten, tortoise (9)\n"
       "    Default: squirrel. Values are in order from faster to slower.\n",
       &params.speed_tier, &ParseSpeedTier, 2);
 
@@ -351,6 +352,14 @@ void CompressArgs::AddCommandLineOptions(CommandLineParser* cmdline) {
   cmdline->AddOptionFlag('p', "progressive",
                          "Enable progressive/responsive decoding.",
                          &progressive, &SetBooleanTrue);
+
+  cmdline->AddOptionFlag('\0', "premultiply",
+                         "Force premultiplied (associated) alpha.",
+                         &force_premultiplied, &SetBooleanTrue, 1);
+  cmdline->AddOptionValue('\0', "keep_invisible", "0|1",
+                          "force disable/enable preserving color of invisible "
+                          "pixels (default: 1 if lossless, 0 if lossy).",
+                          &params.keep_invisible, &ParseOverride, 1);
 
   cmdline->AddOptionFlag('\0', "middleout",
                          "Put center groups first in the compressed file.",
@@ -386,13 +395,13 @@ void CompressArgs::AddCommandLineOptions(CommandLineParser* cmdline) {
                           &num_reps, &ParseUnsigned, 1);
 
   cmdline->AddOptionValue('\0', "noise", "0|1",
-                          "force enable/disable noise generation.",
+                          "force disable/enable noise generation.",
                           &params.noise, &ParseOverride, 1);
   cmdline->AddOptionValue('\0', "dots", "0|1",
-                          "force enable/disable dots generation.", &params.dots,
+                          "force disable/enable dots generation.", &params.dots,
                           &ParseOverride, 1);
   cmdline->AddOptionValue('\0', "patches", "0|1",
-                          "force enable/disable patches generation.",
+                          "force disable/enable patches generation.",
                           &params.patches, &ParseOverride, 1);
   cmdline->AddOptionValue('\0', "resampling", "1|2|4|8",
                           "Subsample all color channels by this factor.",
@@ -412,8 +421,9 @@ void CompressArgs::AddCommandLineOptions(CommandLineParser* cmdline) {
       "Edge preserving filter level (-1 = choose based on quality, default)",
       &params.epf, &ParseSigned, 1);
 
-  cmdline->AddOptionValue('\0', "gaborish", "0|1", "force disable gaborish.",
-                          &params.gaborish, &ParseOverride, 1);
+  cmdline->AddOptionValue('\0', "gaborish", "0|1",
+                          "force disable/enable gaborish.", &params.gaborish,
+                          &ParseOverride, 1);
 
   opt_intensity_target_id = cmdline->AddOptionValue(
       '\0', "intensity_target", "N",
@@ -466,7 +476,7 @@ void CompressArgs::AddCommandLineOptions(CommandLineParser* cmdline) {
        "2-37=RCT (default: try several, depending on speed)"),
       &params.colorspace, &ParseSigned, 1);
 
-  m_group_size_id = cmdline->AddOptionValue(
+  opt_m_group_size_id = cmdline->AddOptionValue(
       'g', "group-size", "K",
       ("[modular encoding] set group size to 128 << K "
        "(default: 1 or 2)"),
@@ -486,11 +496,6 @@ void CompressArgs::AddCommandLineOptions(CommandLineParser* cmdline) {
       'E', "extra-properties", "K",
       "[modular encoding] number of extra MA tree properties to use",
       &params.options.max_properties, &ParseSigned, 2);
-
-  cmdline->AddOptionValue('N', "near-lossless", "max_d",
-                          "[modular encoding] apply near-lossless "
-                          "preprocessing with maximum delta = max_d",
-                          &params.near_lossless, &ParseSigned, 1);
 
   cmdline->AddOptionValue('\0', "palette", "K",
                           "[modular encoding] use a palette if image has at "
@@ -575,10 +580,11 @@ jxl::Status CompressArgs::ValidateArgs(const CommandLineParser& cmdline) {
       }
     }
   }
+  if (params.resampling > 1 && !params.already_downsampled)
+    jpeg_transcode = false;
 
   if (progressive) {
     params.qprogressive_mode = true;
-    params.progressive_dc = 1;
     params.responsive = 1;
     default_settings = false;
   }
@@ -646,11 +652,6 @@ jxl::Status CompressArgs::ValidateArgs(const CommandLineParser& cmdline) {
     }
   }
 
-  if (params.near_lossless) {
-    // Near-lossless assumes -R 0
-    params.responsive = 0;
-  }
-
   if (override_bitdepth > 32) {
     fprintf(stderr, "override_bitdepth must be <= 32\n");
     return false;
@@ -682,7 +683,7 @@ jxl::Status CompressArgs::ValidateArgs(const CommandLineParser& cmdline) {
 jxl::Status CompressArgs::ValidateArgsAfterLoad(
     const CommandLineParser& cmdline, const jxl::CodecInOut& io) {
   if (!ValidateArgs(cmdline)) return false;
-  bool got_m_group_size = cmdline.GetOption(m_group_size_id)->matched();
+  bool got_m_group_size = cmdline.GetOption(opt_m_group_size_id)->matched();
   if (params.modular_mode && !got_m_group_size) {
     // Default modular group size: set to 512 if 256 would be silly
     const size_t kThinImageThr = 256 + 64;
@@ -728,14 +729,10 @@ jxl::Status LoadAll(CompressArgs& args, jxl::ThreadPoolInternal* pool,
     return false;
   }
   if (input_codec != jxl::Codec::kJPG) args.jpeg_transcode = false;
+  if (args.jpeg_transcode) args.params.butteraugli_distance = 0;
 
   if (input_codec == jxl::Codec::kGIF && args.default_settings) {
     args.params.modular_mode = true;
-    args.params.options.predictor = jxl::Predictor::Select;
-    args.params.responsive = 0;
-    args.params.colorspace = 0;
-    args.params.channel_colors_pre_transform_percent = 0;
-    args.params.channel_colors_percent = 0;
     args.params.quality_pair.first = args.params.quality_pair.second = 100;
   }
   if (args.params.modular_mode && args.params.quality_pair.first < 100) {
@@ -750,6 +747,9 @@ jxl::Status LoadAll(CompressArgs& args, jxl::ThreadPoolInternal* pool,
     } else {
       io->metadata.m.SetUintSamples(args.override_bitdepth);
     }
+  }
+  if (args.force_premultiplied) {
+    io->PremultiplyAlpha();
   }
 
   jxl::ImageF saliency_map;

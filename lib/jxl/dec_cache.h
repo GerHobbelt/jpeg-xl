@@ -108,8 +108,7 @@ struct PassesDecoderState {
   // TODO(veluca): this should eventually become "iff no global modular
   // transform was applied".
   bool EagerFinalizeImageRect() const {
-    return shared->frame_header.chroma_subsampling.Is444() &&
-           shared->frame_header.encoding == FrameEncoding::kVarDCT &&
+    return shared->frame_header.encoding == FrameEncoding::kVarDCT &&
            shared->frame_header.nonserialized_metadata->m.extra_channel_info
                .empty();
   }
@@ -117,7 +116,6 @@ struct PassesDecoderState {
   // Amount of padding that will be accessed, in all directions, outside a rect
   // during a call to FinalizeImageRect().
   size_t FinalizeRectPadding() const {
-    // TODO(veluca): add YCbCr upsampling here too.
     size_t padding = shared->frame_header.loop_filter.Padding();
     padding += shared->frame_header.upsampling == 1 ? 0 : 2;
     JXL_DASSERT(padding <= kMaxFinalizeRectPadding);
@@ -125,6 +123,11 @@ struct PassesDecoderState {
       if (ups > 1) {
         padding = std::max(padding, size_t{2});
       }
+    }
+    // We could be making a distinction between h and w padding here, but it is
+    // likely not worth it.
+    if (!shared->frame_header.chroma_subsampling.Is444()) {
+      padding = std::max(padding / 2 + 1, padding);
     }
     return padding;
   }
@@ -134,10 +137,14 @@ struct PassesDecoderState {
   std::vector<Image3F> filter_input_storage;
   std::vector<Image3F> padded_upsampling_input_storage;
   std::vector<Image3F> upsampling_input_storage;
+  size_t upsampler_arena_size = 0;
+  std::vector<hwy::AlignedFreeUniquePtr<float[]>> upsampler_storage;
   // We keep four arrays, one per upsampling level, to reduce memory usage in
   // the common case of no upsampling.
   std::vector<Image3F> output_pixel_data_storage[4] = {};
   std::vector<ImageF> ec_temp_images;
+  std::vector<ImageF> ycbcr_temp_images;
+  std::vector<Image3F> ycbcr_out_images;
 
   // Buffer for decoded pixel data for a group.
   std::vector<Image3F> group_data;
@@ -174,13 +181,28 @@ struct PassesDecoderState {
             kApplyImageFeaturesTileDim + 4);
       }
     }
+    const size_t arena_size = Upsampler::GetArenaSize(
+        kApplyImageFeaturesTileDim * shared->frame_header.upsampling);
+    if (arena_size > upsampler_arena_size) upsampler_storage.clear();
+    for (size_t _ = upsampler_storage.size(); _ < num_threads; _++) {
+      upsampler_storage.emplace_back(hwy::AllocateAligned<float>(arena_size));
+    }
+    upsampler_arena_size = arena_size;
     for (size_t _ = group_data.size(); _ < num_threads; _++) {
       group_data.emplace_back(kGroupDim + 2 * kGroupDataXBorder,
                               kGroupDim + 2 * kGroupDataYBorder);
 #if MEMORY_SANITIZER
       // Avoid errors due to loading vectors on the outermost padding.
-      ZeroFillImage(&group_data.back());
+      FillImage(kSanitizerSentinel, &group_data.back());
 #endif
+    }
+    if (!shared->frame_header.chroma_subsampling.Is444()) {
+      for (size_t _ = ycbcr_temp_images.size(); _ < num_threads; _++) {
+        ycbcr_temp_images.emplace_back(kGroupDim + 2 * kGroupDataXBorder,
+                                       kGroupDim + 2 * kGroupDataYBorder);
+        ycbcr_out_images.emplace_back(kGroupDim + 2 * kGroupDataXBorder,
+                                      kGroupDim + 2 * kGroupDataYBorder);
+      }
     }
     if (rgb_output || pixel_callback) {
       size_t log2_upsampling = CeilLog2Nonzero(shared->frame_header.upsampling);
@@ -310,26 +332,14 @@ struct PassesDecoderState {
     }
 #if MEMORY_SANITIZER
     // Avoid errors due to loading vectors on the outermost padding.
-    ZeroFillImage(&decoded);
+    FillImage(kSanitizerSentinel, &decoded);
 #endif
   }
 
-  void EnsureBordersStorage() {
-    if (!EagerFinalizeImageRect()) return;
-    size_t padding = FinalizeRectPadding();
-    size_t bordery = 2 * padding;
-    size_t borderx = padding + group_border_assigner.PaddingX(padding);
-    Rect horizontal = Rect(0, 0, shared->frame_dim.xsize_padded,
-                           bordery * shared->frame_dim.ysize_groups * 2);
-    if (!SameSize(horizontal, borders_horizontal)) {
-      borders_horizontal = Image3F(horizontal.xsize(), horizontal.ysize());
-    }
-    Rect vertical = Rect(0, 0, borderx * shared->frame_dim.xsize_groups * 2,
-                         shared->frame_dim.ysize_padded);
-    if (!SameSize(vertical, borders_vertical)) {
-      borders_vertical = Image3F(vertical.xsize(), vertical.ysize());
-    }
-  }
+  void EnsureBordersStorage();
+
+  Status FinalizeGroup(size_t group_idx, size_t thread, Image3F* pixel_data,
+                       ImageBundle* output);
 };
 
 // Temp images required for decoding a single group. Reduces memory allocations

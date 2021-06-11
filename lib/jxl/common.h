@@ -22,8 +22,19 @@
 #define JXL_HIGH_PRECISION 1
 #endif
 
+// Macro that defines whether support for decoding JXL files to JPEG is enabled.
+#ifndef JPEGXL_ENABLE_TRANSCODE_JPEG
+#define JPEGXL_ENABLE_TRANSCODE_JPEG 1
+#endif  // JPEGXL_ENABLE_TRANSCODE_JPEG
+
 namespace jxl {
 // Some enums and typedefs used by more than one header file.
+
+#ifdef MEMORY_SANITIZER
+// Chosen so that kSanitizerSentinel is four copies of kSanitizerSentinelByte.
+constexpr uint8_t kSanitizerSentinelByte = 0x48;
+constexpr float kSanitizerSentinel = 205089.125f;
+#endif
 
 constexpr size_t kBitsPerByte = 8;  // more clear than CHAR_BIT
 
@@ -154,22 +165,6 @@ using std::make_unique;
 template <typename T>
 JXL_INLINE T Clamp1(T val, T low, T hi) {
   return val < low ? low : val > hi ? hi : val;
-}
-
-template <typename T>
-JXL_INLINE T ClampToRange(int64_t val) {
-  return Clamp1<int64_t>(val, std::numeric_limits<T>::min(),
-                         std::numeric_limits<T>::max());
-}
-
-template <typename T>
-JXL_INLINE T SaturatingMul(int64_t a, int64_t b) {
-  return ClampToRange<T>(a * b);
-}
-
-template <typename T>
-JXL_INLINE T SaturatingAdd(int64_t a, int64_t b) {
-  return ClampToRange<T>(a + b);
 }
 
 // Encodes non-negative (X) into (2 * X), negative (-X) into (2 * X - 1)

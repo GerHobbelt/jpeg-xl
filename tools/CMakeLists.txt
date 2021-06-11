@@ -245,9 +245,13 @@ if(${JPEGXL_ENABLE_FUZZERS})
   foreach(BINARY IN LISTS FUZZER_BINARIES)
     add_executable("${BINARY}" "${BINARY}.cc")
     target_include_directories("${BINARY}" PRIVATE "${CMAKE_SOURCE_DIR}")
-    target_link_libraries("${BINARY}" jxl-static jxl_extras-static jxl_threads-static jxl_tool)
-    target_compile_options("${BINARY}" PRIVATE "-fsanitize=fuzzer-no-link")
-    target_link_libraries("${BINARY}" -fsanitize=fuzzer)
+    target_link_libraries("${BINARY}"
+        jxl-static
+        jxl_extras-static
+        jxl_threads-static
+        jxl_tool
+        ${JPEGXL_FUZZER_LINK_FLAGS}
+    )
   endforeach()
 endif()  # JPEGXL_ENABLE_FUZZERS
 
@@ -339,6 +343,7 @@ if ("${JNI_FOUND}" AND "${Java_FOUND}")
     jni/org/jpeg/jpegxl/wrapper/Decoder.java
     jni/org/jpeg/jpegxl/wrapper/DecoderJni.java
     jni/org/jpeg/jpegxl/wrapper/ImageData.java
+    jni/org/jpeg/jpegxl/wrapper/PixelFormat.java
   )
   get_target_property(JXL_JNI_WRAPPER_JAR jxl_jni_wrapper JAR_FILE)
 

@@ -71,6 +71,7 @@ set(JPEGXL_INTERNAL_SOURCES_DEC
   jxl/dec_ans.cc
   jxl/dec_ans.h
   jxl/dec_bit_reader.h
+  jxl/dec_cache.cc
   jxl/dec_cache.h
   jxl/dec_context_map.cc
   jxl/dec_context_map.h
@@ -100,6 +101,8 @@ set(JPEGXL_INTERNAL_SOURCES_DEC
   jxl/dec_xyb.cc
   jxl/dec_xyb.h
   jxl/decode.cc
+  jxl/decode_to_jpeg.cc
+  jxl/decode_to_jpeg.h
   jxl/enc_bit_writer.cc
   jxl/enc_bit_writer.h
   jxl/entropy_coder.cc
@@ -158,10 +161,9 @@ set(JPEGXL_INTERNAL_SOURCES_DEC
   jxl/modular/modular_image.cc
   jxl/modular/modular_image.h
   jxl/modular/options.h
-  jxl/modular/transform/near-lossless.h
   jxl/modular/transform/palette.h
+  jxl/modular/transform/rct.h
   jxl/modular/transform/squeeze.h
-  jxl/modular/transform/subtractgreen.h
   jxl/modular/transform/transform.cc
   jxl/modular/transform/transform.h
   jxl/noise.h
@@ -316,6 +318,10 @@ if (JPEGXL_ENABLE_SKCMS)
   list(APPEND JPEGXL_INTERNAL_LIBS skcms)
 else ()
   #list(APPEND JPEGXL_INTERNAL_LIBS lcms2)
+endif ()
+
+if (NOT JPEGXL_ENABLE_TRANSCODE_JPEG)
+  list(APPEND JPEGXL_INTERNAL_FLAGS -DJPEGXL_ENABLE_TRANSCODE_JPEG=0)
 endif ()
 
 set(OBJ_COMPILE_DEFINITIONS

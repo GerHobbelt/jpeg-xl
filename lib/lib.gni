@@ -12,6 +12,20 @@ libjxl_version_defines = [
     "JPEGXL_PATCH_VERSION=7",
 ]
 
+libjxl_public_headers = [
+    "include/jxl/butteraugli.h",
+    "include/jxl/butteraugli_cxx.h",
+    "include/jxl/codestream_header.h",
+    "include/jxl/color_encoding.h",
+    "include/jxl/decode.h",
+    "include/jxl/decode_cxx.h",
+    "include/jxl/encode.h",
+    "include/jxl/encode_cxx.h",
+    "include/jxl/memory_manager.h",
+    "include/jxl/parallel_runner.h",
+    "include/jxl/types.h",
+]
+
 libjxl_dec_sources = [
     "jxl/ac_context.h",
     "jxl/ac_strategy.cc",
@@ -74,6 +88,7 @@ libjxl_dec_sources = [
     "jxl/dec_ans.cc",
     "jxl/dec_ans.h",
     "jxl/dec_bit_reader.h",
+    "jxl/dec_cache.cc",
     "jxl/dec_cache.h",
     "jxl/dec_context_map.cc",
     "jxl/dec_context_map.h",
@@ -103,6 +118,8 @@ libjxl_dec_sources = [
     "jxl/dec_xyb.cc",
     "jxl/dec_xyb.h",
     "jxl/decode.cc",
+    "jxl/decode_to_jpeg.cc",
+    "jxl/decode_to_jpeg.h",
     "jxl/enc_bit_writer.cc",
     "jxl/enc_bit_writer.h",
     "jxl/entropy_coder.cc",
@@ -161,10 +178,9 @@ libjxl_dec_sources = [
     "jxl/modular/modular_image.cc",
     "jxl/modular/modular_image.h",
     "jxl/modular/options.h",
-    "jxl/modular/transform/near-lossless.h",
     "jxl/modular/transform/palette.h",
+    "jxl/modular/transform/rct.h",
     "jxl/modular/transform/squeeze.h",
-    "jxl/modular/transform/subtractgreen.h",
     "jxl/modular/transform/transform.cc",
     "jxl/modular/transform/transform.h",
     "jxl/noise.h",
@@ -362,9 +378,17 @@ libjxl_testlib_sources = [
 ]
 
 libjxl_threads_sources = [
+    "threads/resizable_parallel_runner.cc",
     "threads/thread_parallel_runner.cc",
     "threads/thread_parallel_runner_internal.cc",
     "threads/thread_parallel_runner_internal.h",
+]
+
+libjxl_threads_public_headers = [
+    "include/jxl/resizable_parallel_runner.h",
+    "include/jxl/resizable_parallel_runner_cxx.h",
+    "include/jxl/thread_parallel_runner.h",
+    "include/jxl/thread_parallel_runner_cxx.h",
 ]
 
 libjxl_profiler_sources = [

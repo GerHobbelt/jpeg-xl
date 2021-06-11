@@ -39,6 +39,7 @@
 #include "lib/jxl/dec_reconstruct.h"
 #include "lib/jxl/dec_upsample.h"
 #include "lib/jxl/dec_xyb.h"
+#include "lib/jxl/epf.h"
 #include "lib/jxl/fields.h"
 #include "lib/jxl/filters.h"
 #include "lib/jxl/frame_header.h"
@@ -391,6 +392,7 @@ Status FrameDecoder::ProcessDCGroup(size_t dc_group_id, BitReader* br) {
   PROFILER_FUNC;
   const size_t gx = dc_group_id % frame_dim_.xsize_dc_groups;
   const size_t gy = dc_group_id / frame_dim_.xsize_dc_groups;
+  const LoopFilter& lf = dec_state_->shared->frame_header.loop_filter;
   if (frame_header_.encoding == FrameEncoding::kVarDCT &&
       !(frame_header_.flags & FrameHeader::kUseDcFrame)) {
     JXL_RETURN_IF_ERROR(
@@ -404,6 +406,9 @@ Status FrameDecoder::ProcessDCGroup(size_t dc_group_id, BitReader* br) {
   if (frame_header_.encoding == FrameEncoding::kVarDCT) {
     JXL_RETURN_IF_ERROR(
         modular_frame_decoder_.DecodeAcMetadata(dc_group_id, br, dec_state_));
+  } else if (lf.epf_iters > 0) {
+    FillImage(kInvSigmaNum / lf.epf_sigma_for_modular,
+              &dec_state_->filter_weights.sigma);
   }
   decoded_dc_groups_[dc_group_id] = true;
   return true;
@@ -442,7 +447,7 @@ void FrameDecoder::AllocateOutput() {
            y++) {
         for (size_t x = DivCeil(frame_dim_.xsize_upsampled, ecups);
              x < DivCeil(frame_dim_.xsize_upsampled_padded, ecups); x++) {
-          dec_state_->extra_channels.back().Row(y)[x] = 0;
+          dec_state_->extra_channels.back().Row(y)[x] = kSanitizerSentinel;
         }
       }
 #endif
@@ -850,13 +855,12 @@ Status FrameDecoder::FinalizeFrame() {
 
   if (dec_state_->shared->frame_header.CanBeReferenced()) {
     size_t id = dec_state_->shared->frame_header.save_as_reference;
+    auto& reference_frame = dec_state_->shared_storage.reference_frames[id];
     if (dec_state_->pre_color_transform_frame.xsize() == 0) {
-      dec_state_->shared_storage.reference_frames[id].storage =
-          decoded_->Copy();
+      reference_frame.storage = decoded_->Copy();
     } else {
-      dec_state_->shared_storage.reference_frames[id].storage =
-          ImageBundle(decoded_->metadata());
-      dec_state_->shared_storage.reference_frames[id].storage.SetFromImage(
+      reference_frame.storage = ImageBundle(decoded_->metadata());
+      reference_frame.storage.SetFromImage(
           std::move(dec_state_->pre_color_transform_frame),
           decoded_->c_current());
       if (decoded_->HasExtraChannels()) {
@@ -866,14 +870,25 @@ Status FrameDecoder::FinalizeFrame() {
         for (const auto& ec : *ecs) {
           extra_channels.push_back(CopyImage(ec));
         }
-        dec_state_->shared_storage.reference_frames[id]
-            .storage.SetExtraChannels(std::move(extra_channels));
+        reference_frame.storage.SetExtraChannels(std::move(extra_channels));
       }
     }
-    dec_state_->shared_storage.reference_frames[id].frame =
-        &dec_state_->shared_storage.reference_frames[id].storage;
-    dec_state_->shared_storage.reference_frames[id].ib_is_in_xyb =
+    reference_frame.frame = &reference_frame.storage;
+    reference_frame.ib_is_in_xyb =
         dec_state_->shared->frame_header.save_before_color_transform;
+    if (!dec_state_->shared->frame_header.save_before_color_transform) {
+      const CodecMetadata* metadata =
+          dec_state_->shared->frame_header.nonserialized_metadata;
+      if (reference_frame.frame->xsize() < metadata->xsize() ||
+          reference_frame.frame->ysize() < metadata->ysize()) {
+        return JXL_FAILURE(
+            "trying to save a reference frame that is too small: %zux%zu "
+            "instead of %zux%zu",
+            reference_frame.frame->xsize(), reference_frame.frame->ysize(),
+            metadata->xsize(), metadata->ysize());
+      }
+      reference_frame.storage.ShrinkTo(metadata->xsize(), metadata->ysize());
+    }
   }
   if (dec_state_->shared->frame_header.dc_level != 0) {
     dec_state_->shared_storage

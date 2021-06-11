@@ -88,7 +88,7 @@ Status ImageBlender::PrepareBlending(PassesDecoderState* dec_state,
         info_.source);
   }
 
-  if (bg.xsize() != image_xsize || bg.ysize() != image_ysize ||
+  if (bg.xsize() < image_xsize || bg.ysize() < image_ysize ||
       bg.origin.x0 != 0 || bg.origin.y0 != 0) {
     return JXL_FAILURE("Trying to use a %zux%zu crop as a background",
                        bg.xsize(), bg.ysize());
@@ -127,7 +127,18 @@ Status ImageBlender::PrepareBlending(PassesDecoderState* dec_state,
       if (src.xsize() == 0 && src.ysize() == 0) {
         ZeroFillImage(&dest_->extra_channels()[i]);
       } else {
-        CopyImageTo(src.extra_channels()[i], &dest_->extra_channels()[i]);
+        if (src.extra_channels()[i].xsize() < image_xsize ||
+            src.extra_channels()[i].ysize() < image_ysize ||
+            src.origin.x0 != 0 || src.origin.y0 != 0) {
+          return JXL_FAILURE(
+              "Invalid size %zux%zu or origin %+d%+d for extra channel %zu of "
+              "reference frame %zu, expected at least %zux%zu+0+0",
+              src.extra_channels()[i].xsize(), src.extra_channels()[i].ysize(),
+              static_cast<int>(src.origin.x0), static_cast<int>(src.origin.y0),
+              i, static_cast<size_t>(eci.source), image_xsize, image_ysize);
+        }
+        CopyImageTo(Rect(dest_->extra_channels()[i]), src.extra_channels()[i],
+                    &dest_->extra_channels()[i]);
       }
     }
   }

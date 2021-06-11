@@ -65,7 +65,7 @@ test_copyright() {
   local f
   for f in $(
       git ls-files | grep -E \
-      '(Dockerfile.*|\.c|\.cc|\.cpp|\.gni|\.h|\.java|\.sh|\.m|\.py|\.ui)$'); do
+      '(Dockerfile.*|\.c|\.cc|\.cpp|\.gni|\.h|\.java|\.sh|\.m|\.py|\.ui|\.yml)$'); do
     if [[ "${f#third_party/}" == "$f" ]]; then
       # $f is not in third_party/
       if ! head -n 10 "$f" |
@@ -173,6 +173,15 @@ test_deps_version() {
       cat >&2 <<EOF
 deps.sh: SHA for project ${line} is at ${deps_sha} but the git submodule is at
 ${git_sha}. Please update deps.sh
+
+If you did not intend to change the submodule's SHA value, it is possible that
+you accidentally included this change in your commit after a rebase or checkout
+without running "git submodule --init". To revert the submodule change run from
+the top checkout directory:
+
+  git -C ${line} checkout ${deps_sha}
+  git commit --amend ${line}
+
 EOF
       return 1
     fi

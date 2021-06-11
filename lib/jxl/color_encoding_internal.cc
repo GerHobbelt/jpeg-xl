@@ -702,23 +702,20 @@ Status ConvertExternalToInternalColorEncoding(const JxlColorEncoding& external,
 }
 
 /* Chromatic adaptation matrices*/
-static float kBradford[9] = {
+static const float kBradford[9] = {
     0.8951f, 0.2664f, -0.1614f, -0.7502f, 1.7135f,
     0.0367f, 0.0389f, -0.0685f, 1.0296f,
 };
 
-static float kBradfordInv[9] = {
+static const float kBradfordInv[9] = {
     0.9869929f, -0.1470543f, 0.1599627f, 0.4323053f, 0.5183603f,
     0.0492912f, -0.0085287f, 0.0400428f, 0.9684867f,
 };
 
 // Adapts whitepoint x, y to D50
 Status AdaptToXYZD50(float wx, float wy, float matrix[9]) {
-  if (wx < 0 || wx > 1 || wy < 0 || wy > 1) {
-    return JXL_FAILURE("xy color out of range");
-  }
-
   float w[3] = {wx / wy, 1.0f, (1.0f - wx - wy) / wy};
+  JXL_RETURN_IF_ERROR(std::isfinite(w[0]) && std::isfinite(w[2]));
   float w50[3] = {0.96422f, 1.0f, 0.82521f};
 
   float lms[3];
@@ -740,12 +737,6 @@ Status AdaptToXYZD50(float wx, float wy, float matrix[9]) {
 
 Status PrimariesToXYZD50(float rx, float ry, float gx, float gy, float bx,
                          float by, float wx, float wy, float matrix[9]) {
-  if (rx < 0 || rx > 1 || ry < 0 || ry > 1 || gx < 0 || gx > 1 || gy < 0 ||
-      gy > 1 || bx < 0 || bx > 1 || by < 0 || by > 1 || wx < 0 || wx > 1 ||
-      wy < 0 || wy > 1) {
-    return JXL_FAILURE("xy color out of range");
-  }
-
   float primaries[9] = {
       rx, gx, bx, ry, gy, by, 1.0f - rx - ry, 1.0f - gx - gy, 1.0f - bx - by};
   float primaries_inv[9];
@@ -753,6 +744,7 @@ Status PrimariesToXYZD50(float rx, float ry, float gx, float gy, float bx,
   JXL_RETURN_IF_ERROR(Inv3x3Matrix(primaries_inv));
 
   float w[3] = {wx / wy, 1.0f, (1.0f - wx - wy) / wy};
+  JXL_RETURN_IF_ERROR(std::isfinite(w[0]) && std::isfinite(w[2]));
   float xyz[3];
   MatMul(primaries_inv, w, 3, 3, 1, xyz);
 

@@ -387,14 +387,10 @@ ModularFrameEncoder::ModularFrameEncoder(const FrameHeader& frame_header,
     // no explicit predictor(s) given, set a good default
     if ((cparams.speed_tier <= SpeedTier::kTortoise ||
          cparams.modular_mode == false) &&
-        quality == 100 && cparams.near_lossless == false &&
-        cparams.responsive == false) {
+        quality == 100 && cparams.responsive == false) {
       // TODO(veluca): allow all predictors that don't break residual
       // multipliers in lossy mode.
       cparams.options.predictor = Predictor::Variable;
-    } else if (cparams.near_lossless) {
-      // weighted predictor for near_lossless
-      cparams.options.predictor = Predictor::Weighted;
     } else if (cparams.responsive) {
       // zero predictor for Squeeze residues
       cparams.options.predictor = Predictor::Zero;
@@ -425,6 +421,7 @@ ModularFrameEncoder::ModularFrameEncoder(const FrameHeader& frame_header,
   }
   tree_splits.push_back(num_streams);
   cparams.options.max_chan_size = frame_dim.group_dim;
+  cparams.options.group_dim = frame_dim.group_dim;
 
   // TODO(veluca): figure out how to use different predictor sets per channel.
   stream_options.resize(num_streams, cparams.options);
@@ -474,19 +471,15 @@ Status ModularFrameEncoder::ComputeEncodingData(
     }
   }
 
-  int maxval =
-      (fp ? 1
-          : (1u << static_cast<uint32_t>(metadata.bit_depth.bits_per_sample)) -
-                1);
-
   Image& gi = stream_images[0];
-  gi = Image(xsize, ysize, maxval, nb_chans);
+  gi = Image(xsize, ysize, metadata.bit_depth.bits_per_sample, nb_chans);
   int c = 0;
   if (cparams.color_transform == ColorTransform::kXYB &&
       cparams.modular_mode == true) {
     static const float enc_factors[3] = {32768.0f, 2048.0f, 2048.0f};
     DequantMatricesSetCustomDC(&enc_state->shared.matrices, enc_factors);
   }
+  pixel_type maxval = (1u << gi.bitdepth) - 1;
   if (do_color) {
     for (; c < 3; c++) {
       if (metadata.color_encoding.IsGray() &&
@@ -558,7 +551,7 @@ Status ModularFrameEncoder::ComputeEncodingData(
 
   // Set options and apply transformations
 
-  if (quality < 100 || cparams.near_lossless) {
+  if (quality < 100) {
     if (cparams.palette_colors != 0) {
       JXL_DEBUG_V(3, "Lossy encode, not doing palette transforms");
     }
@@ -567,6 +560,7 @@ Status ModularFrameEncoder::ComputeEncodingData(
     }
     cparams.channel_colors_percent = 0;
     cparams.palette_colors = 0;
+    cparams.lossy_palette = false;
   }
 
   // if few colors, do all-channel palette before trying channel palette
@@ -593,7 +587,9 @@ Status ModularFrameEncoder::ComputeEncodingData(
 
   // Global channel palette
   if (cparams.channel_colors_pre_transform_percent > 0 &&
-      !cparams.lossy_palette) {
+      !cparams.lossy_palette &&
+      (cparams.speed_tier <= SpeedTier::kThunder ||
+       (do_color && metadata.bit_depth.bits_per_sample > 8))) {
     // single channel palette (like FLIF's ChannelCompact)
     for (size_t i = 0; i < gi.nb_channels; i++) {
       int min, max;
@@ -657,8 +653,8 @@ Status ModularFrameEncoder::ComputeEncodingData(
 
   if (cparams.color_transform == ColorTransform::kNone && do_color && !fp) {
     if (cparams.colorspace == 1 ||
-        (cparams.colorspace < 0 && (quality < 100 || cparams.near_lossless ||
-                                    cparams.speed_tier > SpeedTier::kHare))) {
+        (cparams.colorspace < 0 &&
+         (quality < 100 || cparams.speed_tier > SpeedTier::kHare))) {
       Transform ycocg{TransformId::kRCT};
       ycocg.rct_type = 6;
       ycocg.begin_c = gi.nb_meta_channels;
@@ -717,8 +713,9 @@ Status ModularFrameEncoder::ComputeEncodingData(
     }
     for (uint32_t i = gi.nb_meta_channels; i < gi.channel.size(); i++) {
       Channel& ch = gi.channel[i];
-      int shift = ch.hcshift + ch.vcshift;  // number of pixel halvings
-      if (shift > 15) shift = 15;
+      int shift = ch.hshift + ch.vshift;  // number of pixel halvings
+      if (shift > 16) shift = 16;
+      if (shift > 0) shift--;
       int q;
       // assuming default Squeeze here
       int component = ((i - gi.nb_meta_channels) % gi.real_nb_channels);
@@ -862,6 +859,8 @@ Status ModularFrameEncoder::ComputeEncodingData(
     multiplier_info.resize(new_num);
   }
 
+  JXL_RETURN_IF_ERROR(ValidateChannelDimensions(gi, stream_options[0]));
+
   return PrepareEncoding(pool, enc_state->shared.frame_dim,
                          enc_state->heuristics.get(), aux_out);
 }
@@ -973,11 +972,6 @@ Status ModularFrameEncoder::PrepareEncoding(ThreadPool* pool,
     MergeTrees(trees, useful_splits, 0, useful_splits.size() - 1, &tree);
   } else {
     // Fixed tree.
-    // TODO(veluca): determine cutoffs?
-    std::vector<int32_t> cutoffs = {-255, -191, -127, -95, -63, -47, -31, -23,
-                                    -15,  -11,  -7,   -5,  -3,  -1,  0,   1,
-                                    3,    5,    7,    11,  15,  23,  31,  47,
-                                    63,   95,   127,  191, 255};
     size_t total_pixels = 0;
     for (const Image& img : stream_images) {
       for (const Channel& ch : img.channel) {
@@ -985,17 +979,12 @@ Status ModularFrameEncoder::PrepareEncoding(ThreadPool* pool,
       }
     }
     if (cparams.speed_tier <= SpeedTier::kFalcon) {
-      tree = MakeFixedTree(kNumNonrefProperties - weighted::kNumProperties,
-                           cutoffs, Predictor::Weighted, total_pixels);
+      tree = PredefinedTree(ModularOptions::TreeKind::kWPFixedDC, total_pixels);
+    } else if (cparams.speed_tier <= SpeedTier::kThunder) {
+      tree = PredefinedTree(ModularOptions::TreeKind::kGradientFixedDC,
+                            total_pixels);
     } else {
-      tree = MakeFixedTree(kGradientProp, cutoffs, Predictor::Gradient,
-                           total_pixels);
-    }
-  }
-  // TODO(veluca): do this somewhere else.
-  if (cparams.near_lossless) {
-    for (size_t i = 0; i < tree.size(); i++) {
-      tree[i].predictor_offset = 0;
+      tree = {PropertyDecisionNode::Leaf(Predictor::Gradient)};
     }
   }
   tree_tokens.resize(1);
@@ -1047,16 +1036,17 @@ Status ModularFrameEncoder::EncodeGlobalInfo(BitWriter* writer,
   // Write tree
   HistogramParams params;
   if (cparams.speed_tier > SpeedTier::kKitten) {
-    params.clustering = cparams.speed_tier > SpeedTier::kThunder
-                            ? HistogramParams::ClusteringType::kFastest
-                            : HistogramParams::ClusteringType::kFast;
+    params.clustering = HistogramParams::ClusteringType::kFast;
     params.ans_histogram_strategy =
-        HistogramParams::ANSHistogramStrategy::kApproximate;
-    params.lz77_method = cparams.decoding_speed_tier >= 3
-                             ? (cparams.speed_tier >= SpeedTier::kFalcon
-                                    ? HistogramParams::LZ77Method::kRLE
-                                    : HistogramParams::LZ77Method::kLZ77)
-                             : HistogramParams::LZ77Method::kNone;
+        cparams.speed_tier > SpeedTier::kThunder
+            ? HistogramParams::ANSHistogramStrategy::kFast
+            : HistogramParams::ANSHistogramStrategy::kApproximate;
+    params.lz77_method =
+        cparams.decoding_speed_tier >= 3 && cparams.modular_mode
+            ? (cparams.speed_tier >= SpeedTier::kFalcon
+                   ? HistogramParams::LZ77Method::kRLE
+                   : HistogramParams::LZ77Method::kLZ77)
+            : HistogramParams::LZ77Method::kNone;
     // Near-lossless DC, as well as modular mode, require choosing hybrid uint
     // more carefully.
     if ((!extra_dc_precision.empty() && extra_dc_precision[0] != 0) ||
@@ -1197,9 +1187,8 @@ Status ModularFrameEncoder::PrepareStreamParams(const Rect& rect,
   Image& full_image = stream_images[0];
   const size_t xsize = rect.xsize();
   const size_t ysize = rect.ysize();
-  int maxval = full_image.maxval;
   Image& gi = stream_images[stream_id];
-  gi = Image(xsize, ysize, maxval, 0);
+  gi = Image(xsize, ysize, full_image.bitdepth, 0);
   // start at the first bigger-than-frame_dim.group_dim non-metachannel
   size_t c = full_image.nb_meta_channels;
   for (; c < full_image.channel.size(); c++) {
@@ -1285,31 +1274,11 @@ Status ModularFrameEncoder::PrepareStreamParams(const Rect& rect,
       gi.do_transform(maybe_palette_1, weighted::Header());
     }
   }
-  if (cparams.near_lossless > 0 && gi.nb_channels != 0) {
-    Transform nl(TransformId::kNearLossless);
-    nl.predictor = cparams.options.predictor;
-    JXL_RETURN_IF_ERROR(nl.predictor != Predictor::Best);
-    JXL_RETURN_IF_ERROR(nl.predictor != Predictor::Variable);
-    nl.begin_c = gi.nb_meta_channels;
-    if (cparams.colorspace == 0) {
-      nl.num_c = gi.nb_channels;
-      nl.max_delta_error = cparams.near_lossless;
-      gi.do_transform(nl, weighted::Header());
-    } else {
-      nl.num_c = 1;
-      nl.max_delta_error = cparams.near_lossless;
-      gi.do_transform(nl, weighted::Header());
-      nl.begin_c += 1;
-      nl.num_c = gi.nb_channels - 1;
-      nl.max_delta_error++;  // more loss for chroma
-      gi.do_transform(nl, weighted::Header());
-    }
-  }
 
   // lossless and no specific color transform specified: try Nothing, YCoCg,
   // and 17 RCTs
   if (cparams.color_transform == ColorTransform::kNone && quality == 100 &&
-      cparams.colorspace < 0 && gi.nb_channels > 2 && !cparams.near_lossless &&
+      cparams.colorspace < 0 && gi.nb_channels > 2 &&
       cparams.responsive == false && do_color &&
       cparams.speed_tier <= SpeedTier::kHare) {
     Transform sg(TransformId::kRCT);
@@ -1436,7 +1405,7 @@ void ModularFrameEncoder::AddVarDCTDC(const Image3F& dc, size_t group_index,
         ModularOptions::TreeKind::kGradientFixedDC;
   }
 
-  stream_images[stream_id] = Image(r.xsize(), r.ysize(), 255, 3);
+  stream_images[stream_id] = Image(r.xsize(), r.ysize(), 8, 3);
   if (nl_dc && stream_options[stream_id].tree_kind ==
                    ModularOptions::TreeKind::kGradientFixedDC) {
     JXL_ASSERT(enc_state->shared.frame_header.chroma_subsampling.Is444());
@@ -1580,7 +1549,7 @@ void ModularFrameEncoder::AddACMetadata(size_t group_index, bool jpeg_transcode,
   }
   // YToX, YToB, ACS + QF, EPF
   Image& image = stream_images[stream_id];
-  image = Image(r.xsize(), r.ysize(), 255, 4);
+  image = Image(r.xsize(), r.ysize(), 8, 4);
   static_assert(kColorTileDimInBlocks == 8, "Color tile size changed");
   Rect cr(r.x0() >> 3, r.y0() >> 3, (r.xsize() + 7) >> 3, (r.ysize() + 7) >> 3);
   image.channel[0] = Channel(cr.xsize(), cr.ysize(), 3, 3);
@@ -1623,7 +1592,7 @@ void ModularFrameEncoder::EncodeQuantTable(
         writer, nullptr, 0, ModularStreamId::QuantTable(idx)));
     return;
   }
-  Image image(size_x, size_y, 255, 3);
+  Image image(size_x, size_y, 8, 3);
   for (size_t c = 0; c < 3; c++) {
     for (size_t y = 0; y < size_y; y++) {
       int* JXL_RESTRICT row = image.channel[c].Row(y);
@@ -1643,7 +1612,7 @@ void ModularFrameEncoder::AddQuantTable(size_t size_x, size_t size_y,
   JXL_ASSERT(encoding.qraw.qtable != nullptr);
   JXL_ASSERT(size_x * size_y * 3 == encoding.qraw.qtable->size());
   Image& image = stream_images[stream_id];
-  image = Image(size_x, size_y, 255, 3);
+  image = Image(size_x, size_y, 8, 3);
   for (size_t c = 0; c < 3; c++) {
     for (size_t y = 0; y < size_y; y++) {
       int* JXL_RESTRICT row = image.channel[c].Row(y);

@@ -399,7 +399,7 @@ Status MakeFrameHeader(const CompressParams& cparams,
 // edge duplication but not more. It would probably be better to smear in all
 // directions. That requires an alpha-weighed convolution with a large enough
 // kernel though, which might be overkill...
-void SimplifyInvisible(Image3F* image, const ImageF& alpha) {
+void SimplifyInvisible(Image3F* image, const ImageF& alpha, bool lossless) {
   for (size_t c = 0; c < 3; ++c) {
     for (size_t y = 0; y < image->ysize(); ++y) {
       float* JXL_RESTRICT row = image->PlaneRow(c, y);
@@ -413,6 +413,10 @@ void SimplifyInvisible(Image3F* image, const ImageF& alpha) {
           (y + 1 < image->ysize() ? alpha.Row(y + 1) : nullptr);
       for (size_t x = 0; x < image->xsize(); ++x) {
         if (a[x] == 0) {
+          if (lossless) {
+            row[x] = 0;
+            continue;
+          }
           float d = 0.f;
           row[x] = 0;
           if (x > 0) {
@@ -1012,9 +1016,6 @@ Status EncodeFrame(const CompressParams& cparams_orig,
   passes_enc_state->special_frames.clear();
 
   CompressParams cparams = cparams_orig;
-  if (ib.color_transform != ColorTransform::kNone) {
-    cparams.color_transform = ib.color_transform;
-  }
 
   if (cparams.progressive_dc < 0) {
     if (cparams.progressive_dc != -1) {
@@ -1160,16 +1161,16 @@ Status EncodeFrame(const CompressParams& cparams_orig,
               // input is already in XYB.
       CopyImageTo(ib.color(), &opsin);
     }
+    bool lossless = (frame_header->encoding == FrameEncoding::kModular &&
+                     cparams.quality_pair.first == 100);
     if (ib.HasAlpha() && !ib.AlphaIsPremultiplied() &&
-        (frame_header->encoding == FrameEncoding::kVarDCT ||
-         cparams.quality_pair.first < 100) &&
-        !cparams.keep_invisible &&
+        !ApplyOverride(cparams.keep_invisible, lossless) &&
         cparams.ec_resampling == cparams.resampling) {
-      // if lossy, simplify invisible pixels
-      SimplifyInvisible(&opsin, ib.alpha());
+      // simplify invisible pixels
+      SimplifyInvisible(&opsin, ib.alpha(), lossless);
       if (want_linear) {
         SimplifyInvisible(const_cast<Image3F*>(&ib_or_linear->color()),
-                          ib.alpha());
+                          ib.alpha(), lossless);
       }
     }
     if (aux_out != nullptr) {
@@ -1339,17 +1340,32 @@ Status EncodeFrame(const CompressParams& cparams_orig,
     std::iota(permutation.begin(), permutation.end(), 0);
     std::vector<coeff_order_t> ac_group_order(num_groups);
     std::iota(ac_group_order.begin(), ac_group_order.end(), 0);
-    int64_t cx = ib.xsize() / 2;
-    int64_t cy = ib.ysize() / 2;
+    size_t group_dim = frame_dim.group_dim;
+    // The center of the image.
+    int64_t imag_cx = ib.xsize() / 2;
+    int64_t imag_cy = ib.ysize() / 2;
+    // The center of the group containing the center of the image.
+    int64_t cx = (imag_cx / group_dim) * group_dim + group_dim / 2;
+    int64_t cy = (imag_cy / group_dim) * group_dim + group_dim / 2;
+    // This identifies in what area of the central group the center of the image
+    // lies in.
+    double direction = std::atan2(imag_cy - cy, imag_cx - cx);
+    // This identifies the side of the central group the center of the image
+    // lies closet to. This can take values 0, 1, 2, 3 corresponding to right,
+    // top, left, bottom.
+    int64_t side = std::fmod((direction + 5 * kPi / 4), 2 * kPi) * 2 / kPi;
     auto get_distance_from_center = [&](size_t gid) {
       Rect r = passes_enc_state->shared.GroupRect(gid);
-      int64_t gcx = r.x0() + r.xsize() / 2;
-      int64_t gcy = r.y0() + r.ysize() / 2;
+      int64_t gcx = r.x0() + group_dim / 2;
+      int64_t gcy = r.y0() + group_dim / 2;
       int64_t dx = gcx - cx;
       int64_t dy = gcy - cy;
+      // The angle is determined by taking atan2 and adding an appropriate
+      // starting point depending on the side we want to start on.
+      double angle = std::remainder(
+          -std::atan2(dy, dx) + kPi / 4 + side * (kPi / 2), 2 * kPi);
       // Concentric squares in counterclockwise order.
-      return std::make_pair(std::max(std::abs(dx), std::abs(dy)),
-                            std::atan2(dy, dx));
+      return std::make_pair(std::max(std::abs(dx), std::abs(dy)), angle);
     };
     std::sort(ac_group_order.begin(), ac_group_order.end(),
               [&](coeff_order_t a, coeff_order_t b) {
