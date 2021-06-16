@@ -94,6 +94,7 @@ set(JPEGXL_INTERNAL_SOURCES_DEC
   jxl/dec_patch_dictionary.h
   jxl/dec_reconstruct.cc
   jxl/dec_reconstruct.h
+  jxl/dec_render_pipeline.h
   jxl/dec_transforms-inl.h
   jxl/dec_upsample.cc
   jxl/dec_upsample.h
@@ -163,6 +164,7 @@ set(JPEGXL_INTERNAL_SOURCES_DEC
   jxl/modular/options.h
   jxl/modular/transform/palette.h
   jxl/modular/transform/rct.h
+  jxl/modular/transform/squeeze.cc
   jxl/modular/transform/squeeze.h
   jxl/modular/transform/transform.cc
   jxl/modular/transform/transform.h
@@ -282,6 +284,14 @@ set(JPEGXL_INTERNAL_SOURCES_ENC
   jxl/modular/encoding/enc_encoding.h
   jxl/modular/encoding/enc_ma.cc
   jxl/modular/encoding/enc_ma.h
+  jxl/modular/transform/enc_palette.cc
+  jxl/modular/transform/enc_palette.h
+  jxl/modular/transform/enc_rct.cc
+  jxl/modular/transform/enc_rct.h
+  jxl/modular/transform/enc_squeeze.cc
+  jxl/modular/transform/enc_squeeze.h
+  jxl/modular/transform/enc_transform.cc
+  jxl/modular/transform/enc_transform.h
   jxl/optimize.cc
   jxl/optimize.h
   jxl/progressive_split.cc

@@ -138,7 +138,6 @@ Status DecodeModularChannelMAANS(BitReader *br, ANSSymbolReader *reader,
   // zero pixel channel? could happen
   if (channel.w == 0 || channel.h == 0) return true;
 
-  channel.resize(channel.w, channel.h);
   bool tree_has_wp_prop_or_pred = false;
   bool is_wp_only = false;
   bool is_gradient_only = false;
@@ -430,8 +429,25 @@ Status ModularDecode(BitReader *br, Image &image, GroupHeader &header,
   const ANSCode *code = &code_storage;
   const std::vector<uint8_t> *context_map = &context_map_storage;
   if (!header.use_global_tree) {
-    size_t tree_size_limit = 1024 + image.w * image.h * nb_channels;
-    JXL_RETURN_IF_ERROR(DecodeTree(br, &tree_storage, tree_size_limit));
+    size_t max_tree_size = 1024;
+    for (size_t i = 0; i < nb_channels; i++) {
+      Channel &channel = image.channel[i];
+      if (!channel.w || !channel.h) {
+        continue;  // skip empty channels
+      }
+      if (i >= image.nb_meta_channels && (channel.w > options->max_chan_size ||
+                                          channel.h > options->max_chan_size)) {
+        break;
+      }
+      size_t pixels = channel.w * channel.h;
+      if (pixels / channel.w != channel.h) {
+        return JXL_FAILURE("Tree size overflow");
+      }
+      max_tree_size += pixels;
+      if (max_tree_size < pixels) return JXL_FAILURE("Tree size overflow");
+    }
+
+    JXL_RETURN_IF_ERROR(DecodeTree(br, &tree_storage, max_tree_size));
     JXL_RETURN_IF_ERROR(DecodeHistograms(br, (tree_storage.size() + 1) / 2,
                                          &code_storage, &context_map_storage));
   } else {
@@ -462,6 +478,7 @@ Status ModularDecode(BitReader *br, Image &image, GroupHeader &header,
     if (!br->AllReadsWithinBounds()) {
       if (!allow_truncated_group) return JXL_FAILURE("Truncated input");
       ZeroFillImage(&channel.plane);
+      while (++i < nb_channels) ZeroFillImage(&image.channel[i].plane);
       return Status(StatusCode::kNotEnoughBytes);
     }
   }
@@ -493,7 +510,7 @@ Status ModularGenericDecompress(BitReader *br, Image &image,
   if (image.error) return JXL_FAILURE("Corrupt file. Aborting.");
   size_t bit_pos = br->TotalBitsConsumed();
   JXL_DEBUG_V(4, "Modular-decoded a %zux%zu nbchans=%zu image from %zu bytes",
-              image.w, image.h, image.real_nb_channels,
+              image.w, image.h, image.nb_channels,
               (br->TotalBitsConsumed() - bit_pos) / 8);
   (void)bit_pos;
 #ifdef JXL_ENABLE_ASSERT
