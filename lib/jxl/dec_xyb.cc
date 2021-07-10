@@ -21,6 +21,7 @@
 #include "lib/jxl/image.h"
 #include "lib/jxl/opsin_params.h"
 #include "lib/jxl/quantizer.h"
+#include "lib/jxl/sanitizers.h"
 HWY_BEFORE_NAMESPACE();
 namespace jxl {
 namespace HWY_NAMESPACE {
@@ -31,6 +32,7 @@ using hwy::HWY_NAMESPACE::Broadcast;
 void OpsinToLinearInplace(Image3F* JXL_RESTRICT inout, ThreadPool* pool,
                           const OpsinParams& opsin_params) {
   PROFILER_FUNC;
+  JXL_CHECK_IMAGE_INITIALIZED(*inout, Rect(*inout));
 
   const size_t xsize = inout->xsize();  // not padded
   RunOnPool(
@@ -71,6 +73,7 @@ void OpsinToLinear(const Image3F& opsin, const Rect& rect, ThreadPool* pool,
   PROFILER_FUNC;
 
   JXL_ASSERT(SameSize(rect, *linear));
+  JXL_CHECK_IMAGE_INITIALIZED(opsin, rect);
 
   RunOnPool(
       pool, 0, static_cast<int>(rect.ysize()), ThreadPool::SkipInit(),
@@ -104,11 +107,13 @@ void OpsinToLinear(const Image3F& opsin, const Rect& rect, ThreadPool* pool,
         }
       },
       "OpsinToLinear(Rect)");
+  JXL_CHECK_IMAGE_INITIALIZED(*linear, rect);
 }
 
 // Transform YCbCr to RGB.
 // Could be performed in-place (i.e. Y, Cb and Cr could alias R, B and B).
 void YcbcrToRgb(const Image3F& ycbcr, Image3F* rgb, const Rect& rect) {
+  JXL_CHECK_IMAGE_INITIALIZED(ycbcr, rect);
   const HWY_CAPPED(float, GroupBorderAssigner::kPaddingXRound) df;
   const size_t S = Lanes(df);  // Step.
 
@@ -143,6 +148,7 @@ void YcbcrToRgb(const Image3F& ycbcr, Image3F* rgb, const Rect& rect) {
       Store(b_vec, df, b_row + x);
     }
   }
+  JXL_CHECK_IMAGE_INITIALIZED(*rgb, rect);
 }
 
 // NOLINTNEXTLINE(google-readability-namespace-comments)
@@ -197,14 +203,14 @@ void OpsinParams::Init(float intensity_target) {
   }
 }
 
-Status OutputEncodingInfo::Set(const ImageMetadata& metadata,
+Status OutputEncodingInfo::Set(const CodecMetadata& metadata,
                                const ColorEncoding& default_enc) {
   const auto& im = metadata.transform_data.opsin_inverse_matrix;
   float inverse_matrix[9];
   memcpy(inverse_matrix, im.inverse_matrix, sizeof(inverse_matrix));
-  float intensity_target = metadata.IntensityTarget();
-  if (metadata.xyb_encoded) {
-    const auto& orig_color_encoding = metadata.color_encoding;
+  float intensity_target = metadata.m.IntensityTarget();
+  if (metadata.m.xyb_encoded) {
+    const auto& orig_color_encoding = metadata.m.color_encoding;
     color_encoding = default_enc;
     // Figure out if we can output to this color encoding.
     do {
@@ -262,7 +268,7 @@ Status OutputEncodingInfo::Set(const ImageMetadata& metadata,
       }
     } while (false);
   } else {
-    color_encoding = metadata.color_encoding;
+    color_encoding = metadata.m.color_encoding;
   }
   if (std::abs(intensity_target - 255.0) > 0.1f || !im.all_default) {
     all_default_opsin = false;

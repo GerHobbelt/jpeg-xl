@@ -21,16 +21,25 @@ void InvHSqueeze(Image &input, int c, int rc, ThreadPool *pool) {
   JXL_ASSERT(chin.w == DivCeil(chin.w + chin_residual.w, 2));
   JXL_ASSERT(chin.h == chin_residual.h);
 
-  if (chin_residual.w == 0 || chin_residual.h == 0) {
+  if (chin_residual.w == 0) {
+    // Short-circuit: output channel has same dimensions as input.
     input.channel[c].hshift--;
     return;
   }
 
+  // Note: chin.w >= chin_residual.w and at most 1 different.
   Channel chout(chin.w + chin_residual.w, chin.h, chin.hshift - 1, chin.vshift);
   JXL_DEBUG_V(4,
               "Undoing horizontal squeeze of channel %i using residuals in "
               "channel %i (going from width %zu to %zu)",
               c, rc, chin.w, chout.w);
+
+  if (chin_residual.h == 0) {
+    // Short-circuit: channel with no pixels.
+    input.channel[c] = std::move(chout);
+    return;
+  }
+
   RunOnPool(
       pool, 0, chin.h, ThreadPool::SkipInit(),
       [&](const int task, const int thread) {
@@ -76,7 +85,8 @@ void InvVSqueeze(Image &input, int c, int rc, ThreadPool *pool) {
   JXL_ASSERT(chin.h == DivCeil(chin.h + chin_residual.h, 2));
   JXL_ASSERT(chin.w == chin_residual.w);
 
-  if (chin_residual.w == 0 || chin_residual.h == 0) {
+  if (chin_residual.h == 0) {
+    // Short-circuit: output channel has same dimensions as input.
     input.channel[c].vshift--;
     return;
   }
@@ -88,6 +98,12 @@ void InvVSqueeze(Image &input, int c, int rc, ThreadPool *pool) {
       "Undoing vertical squeeze of channel %i using residuals in channel "
       "%i (going from height %zu to %zu)",
       c, rc, chin.h, chout.h);
+
+  if (chin_residual.w == 0) {
+    // Short-circuit: channel with no pixels.
+    input.channel[c] = std::move(chout);
+    return;
+  }
 
   intptr_t onerow_in = chin.plane.PixelsPerRow();
   intptr_t onerow_out = chout.plane.PixelsPerRow();

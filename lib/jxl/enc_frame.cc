@@ -87,7 +87,6 @@ void ClusterGroups(PassesEncoderState* enc_state) {
   params.ans_histogram_strategy =
       HistogramParams::ANSHistogramStrategy::kApproximate;
   size_t max = 0;
-  float total_cost = 0;
   auto token_cost = [&](std::vector<std::vector<Token>>& tokens, size_t num_ctx,
                         bool estimate = true) {
     // TODO(veluca): not estimating is very expensive.
@@ -108,7 +107,6 @@ void ClusterGroups(PassesEncoderState* enc_state) {
     if (costs[i] > costs[max]) {
       max = i;
     }
-    total_cost += costs[i];
   }
   auto dist = [&](int i, int j) {
     std::vector<std::vector<Token>> tokens{ac[i], ac[j]};
@@ -215,7 +213,8 @@ uint64_t FrameFlagsFromParams(const CompressParams& cparams) {
   // We don't add noise at low butteraugli distances because the original
   // noise is stored within the compressed image and adding noise makes things
   // worse.
-  if (ApplyOverride(cparams.noise, dist >= kMinButteraugliForNoise)) {
+  if (ApplyOverride(cparams.noise, dist >= kMinButteraugliForNoise) ||
+      cparams.photon_noise_iso > 0) {
     flags |= FrameHeader::kNoise;
   }
 
@@ -1032,6 +1031,7 @@ Status EncodeFrame(const CompressParams& cparams_orig,
   if (cparams.ec_resampling < cparams.resampling) {
     cparams.ec_resampling = cparams.resampling;
   }
+  if (cparams.resampling > 1) cparams.progressive_dc = 0;
 
   if (frame_info.dc_level + cparams.progressive_dc > 4) {
     return JXL_FAILURE("Too many levels of progressive DC");
@@ -1333,7 +1333,7 @@ Status EncodeFrame(const CompressParams& cparams_orig,
 
   std::vector<coeff_order_t>* permutation_ptr = nullptr;
   std::vector<coeff_order_t> permutation;
-  if (cparams.middleout && !(num_passes == 1 && num_groups == 1)) {
+  if (cparams.centerfirst && !(num_passes == 1 && num_groups == 1)) {
     permutation_ptr = &permutation;
     // Don't permute global DC/AC or DC.
     permutation.resize(global_ac_index + 1);
@@ -1341,18 +1341,36 @@ Status EncodeFrame(const CompressParams& cparams_orig,
     std::vector<coeff_order_t> ac_group_order(num_groups);
     std::iota(ac_group_order.begin(), ac_group_order.end(), 0);
     size_t group_dim = frame_dim.group_dim;
-    // The center of the image.
-    int64_t imag_cx = ib.xsize() / 2;
-    int64_t imag_cy = ib.ysize() / 2;
+
+    // The center of the image is either given by parameters or chosen
+    // to be the middle of the image by default if center_x, center_y resp.
+    // are not provided.
+
+    int64_t imag_cx;
+    if (cparams.center_x != static_cast<size_t>(-1)) {
+      JXL_RETURN_IF_ERROR(cparams.center_x < ib.xsize());
+      imag_cx = cparams.center_x;
+    } else {
+      imag_cx = ib.xsize() / 2;
+    }
+
+    int64_t imag_cy;
+    if (cparams.center_y != static_cast<size_t>(-1)) {
+      JXL_RETURN_IF_ERROR(cparams.center_y < ib.ysize());
+      imag_cy = cparams.center_y;
+    } else {
+      imag_cy = ib.ysize() / 2;
+    }
+
     // The center of the group containing the center of the image.
     int64_t cx = (imag_cx / group_dim) * group_dim + group_dim / 2;
     int64_t cy = (imag_cy / group_dim) * group_dim + group_dim / 2;
     // This identifies in what area of the central group the center of the image
     // lies in.
-    double direction = std::atan2(imag_cy - cy, imag_cx - cx);
+    double direction = -std::atan2(imag_cy - cy, imag_cx - cx);
     // This identifies the side of the central group the center of the image
-    // lies closet to. This can take values 0, 1, 2, 3 corresponding to right,
-    // top, left, bottom.
+    // lies closest to. This can take values 0, 1, 2, 3 corresponding to left,
+    // bottom, right, top.
     int64_t side = std::fmod((direction + 5 * kPi / 4), 2 * kPi) * 2 / kPi;
     auto get_distance_from_center = [&](size_t gid) {
       Rect r = passes_enc_state->shared.GroupRect(gid);
@@ -1363,8 +1381,8 @@ Status EncodeFrame(const CompressParams& cparams_orig,
       // The angle is determined by taking atan2 and adding an appropriate
       // starting point depending on the side we want to start on.
       double angle = std::remainder(
-          -std::atan2(dy, dx) + kPi / 4 + side * (kPi / 2), 2 * kPi);
-      // Concentric squares in counterclockwise order.
+          std::atan2(dy, dx) + kPi / 4 + side * (kPi / 2), 2 * kPi);
+      // Concentric squares in clockwise order.
       return std::make_pair(std::max(std::abs(dx), std::abs(dy)), angle);
     };
     std::sort(ac_group_order.begin(), ac_group_order.end(),

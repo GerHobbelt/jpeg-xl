@@ -43,8 +43,6 @@ set(JPEGXL_INTERNAL_SOURCES_DEC
   jxl/base/status.cc
   jxl/base/status.h
   jxl/base/thread_pool_internal.h
-  jxl/base/time.cc
-  jxl/base/time.h
   jxl/blending.cc
   jxl/blending.h
   jxl/chroma_from_luma.cc
@@ -181,6 +179,7 @@ set(JPEGXL_INTERNAL_SOURCES_DEC
   jxl/quantizer.cc
   jxl/quantizer.h
   jxl/rational_polynomial-inl.h
+  jxl/sanitizers.h
   jxl/splines.cc
   jxl/splines.h
   jxl/toc.cc
@@ -256,6 +255,8 @@ set(JPEGXL_INTERNAL_SOURCES_ENC
   jxl/enc_params.h
   jxl/enc_patch_dictionary.cc
   jxl/enc_patch_dictionary.h
+  jxl/enc_photon_noise.cc
+  jxl/enc_photon_noise.h
   jxl/enc_quant_weights.cc
   jxl/enc_quant_weights.h
   jxl/enc_splines.cc

@@ -153,10 +153,6 @@ struct CompressParams {
   Override gaborish = Override::kDefault;
   int epf = -1;
 
-  // TODO(deymo): Remove "gradient" once all clients stop setting this value.
-  // This flag is already deprecated and is unused in the encoder.
-  Override gradient = Override::kOff;
-
   // Progressive mode.
   bool progressive_mode = false;
 
@@ -164,7 +160,11 @@ struct CompressParams {
   bool qprogressive_mode = false;
 
   // Put center groups first in the bitstream.
-  bool middleout = false;
+  bool centerfirst = false;
+
+  // Pixel coordinates of the center. First group will contain that center.
+  size_t center_x = static_cast<size_t>(-1);
+  size_t center_y = static_cast<size_t>(-1);
 
   int progressive_dc = -1;
 
@@ -207,6 +207,10 @@ struct CompressParams {
   // effects on the decoded pixels, while still being JPEG-compliant and
   // allowing reconstruction of the original JPEG.
   bool force_cfl_jpeg_recompression = true;
+
+  // Set the noise to what it would approximately be if shooting at the nominal
+  // exposure for a given ISO setting on a 35mm camera.
+  float photon_noise_iso = 0;
 
   // modular mode options below
   ModularOptions options;

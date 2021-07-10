@@ -90,7 +90,7 @@ jxl::Status DoDecode(JNIEnv* env, jobject data_buffer, size_t* info_pixels_size,
 
   JxlDecoder* dec = JxlDecoderCreate(NULL);
 
-  constexpr size_t kNumThreads = 0;  // Do everyting in this thread.
+  constexpr size_t kNumThreads = 0;  // Do everything in this thread.
   void* runner = JxlThreadParallelRunnerCreate(NULL, kNumThreads);
 
   struct Defer {
@@ -215,8 +215,8 @@ Java_org_jpeg_jpegxl_wrapper_DecoderJni_nativeGetBasicInfo(
           /* pixels_buffer= */ nullptr, /* icc_buffer= */ nullptr);
     } else {
       status =
-          DoDecode(env, data_buffer, /* pixels_size= */ nullptr,
-                   /* icc_size= */ nullptr, &info, pixel_format,
+          DoDecode(env, data_buffer, /* info_pixels_size= */ nullptr,
+                   /* info_icc_size= */ nullptr, &info, pixel_format,
                    /* pixels_buffer= */ nullptr, /* icc_buffer= */ nullptr);
     }
   }

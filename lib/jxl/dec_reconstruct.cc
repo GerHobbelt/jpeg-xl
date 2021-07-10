@@ -31,146 +31,120 @@
 #include "lib/jxl/frame_header.h"
 #include "lib/jxl/loop_filter.h"
 #include "lib/jxl/passes_state.h"
+#include "lib/jxl/sanitizers.h"
 #include "lib/jxl/transfer_functions-inl.h"
 HWY_BEFORE_NAMESPACE();
 namespace jxl {
 namespace HWY_NAMESPACE {
 
-Status UndoXYBInPlace(Image3F* idct, const Rect& rect,
+template <typename Op>
+void DoUndoXYBInPlace(Image3F* idct, const Rect& rect, Op op,
                       const OutputEncodingInfo& output_encoding_info) {
-  PROFILER_ZONE("UndoXYB");
-
+  // TODO(eustas): should it still be capped?
+  const HWY_CAPPED(float, GroupBorderAssigner::kPaddingXRound) d;
+  const size_t xsize = rect.xsize();
+  const size_t xsize_v = RoundUpTo(xsize, Lanes(d));
   // The size of `rect` might not be a multiple of Lanes(d), but is guaranteed
   // to be a multiple of kBlockDim or at the margin of the image.
   for (size_t y = 0; y < rect.ysize(); y++) {
     float* JXL_RESTRICT row0 = rect.PlaneRow(idct, 0, y);
     float* JXL_RESTRICT row1 = rect.PlaneRow(idct, 1, y);
     float* JXL_RESTRICT row2 = rect.PlaneRow(idct, 2, y);
-
-    const HWY_CAPPED(float, GroupBorderAssigner::kPaddingXRound) d;
-
-    if (output_encoding_info.color_encoding.tf.IsLinear()) {
-      for (size_t x = 0; x < rect.xsize(); x += Lanes(d)) {
-        const auto in_opsin_x = Load(d, row0 + x);
-        const auto in_opsin_y = Load(d, row1 + x);
-        const auto in_opsin_b = Load(d, row2 + x);
-        JXL_COMPILER_FENCE;
-        auto linear_r = Undefined(d);
-        auto linear_g = Undefined(d);
-        auto linear_b = Undefined(d);
-        XybToRgb(d, in_opsin_x, in_opsin_y, in_opsin_b,
-                 output_encoding_info.opsin_params, &linear_r, &linear_g,
-                 &linear_b);
-
-        Store(linear_r, d, row0 + x);
-        Store(linear_g, d, row1 + x);
-        Store(linear_b, d, row2 + x);
-      }
-    } else if (output_encoding_info.color_encoding.tf.IsSRGB()) {
-      for (size_t x = 0; x < rect.xsize(); x += Lanes(d)) {
-        const auto in_opsin_x = Load(d, row0 + x);
-        const auto in_opsin_y = Load(d, row1 + x);
-        const auto in_opsin_b = Load(d, row2 + x);
-        JXL_COMPILER_FENCE;
-        auto linear_r = Undefined(d);
-        auto linear_g = Undefined(d);
-        auto linear_b = Undefined(d);
-        XybToRgb(d, in_opsin_x, in_opsin_y, in_opsin_b,
-                 output_encoding_info.opsin_params, &linear_r, &linear_g,
-                 &linear_b);
-
-#if JXL_HIGH_PRECISION
-        Store(TF_SRGB().EncodedFromDisplay(d, linear_r), d, row0 + x);
-        Store(TF_SRGB().EncodedFromDisplay(d, linear_g), d, row1 + x);
-        Store(TF_SRGB().EncodedFromDisplay(d, linear_b), d, row2 + x);
-#else
-        Store(FastLinearToSRGB(d, linear_r), d, row0 + x);
-        Store(FastLinearToSRGB(d, linear_g), d, row1 + x);
-        Store(FastLinearToSRGB(d, linear_b), d, row2 + x);
-#endif
-      }
-    } else if (output_encoding_info.color_encoding.tf.IsPQ()) {
-      for (size_t x = 0; x < rect.xsize(); x += Lanes(d)) {
-        const auto in_opsin_x = Load(d, row0 + x);
-        const auto in_opsin_y = Load(d, row1 + x);
-        const auto in_opsin_b = Load(d, row2 + x);
-        JXL_COMPILER_FENCE;
-        auto linear_r = Undefined(d);
-        auto linear_g = Undefined(d);
-        auto linear_b = Undefined(d);
-        XybToRgb(d, in_opsin_x, in_opsin_y, in_opsin_b,
-                 output_encoding_info.opsin_params, &linear_r, &linear_g,
-                 &linear_b);
-        Store(TF_PQ().EncodedFromDisplay(d, linear_r), d, row0 + x);
-        Store(TF_PQ().EncodedFromDisplay(d, linear_g), d, row1 + x);
-        Store(TF_PQ().EncodedFromDisplay(d, linear_b), d, row2 + x);
-      }
-    } else if (output_encoding_info.color_encoding.tf.IsHLG()) {
-      for (size_t x = 0; x < rect.xsize(); x += Lanes(d)) {
-        const auto in_opsin_x = Load(d, row0 + x);
-        const auto in_opsin_y = Load(d, row1 + x);
-        const auto in_opsin_b = Load(d, row2 + x);
-        JXL_COMPILER_FENCE;
-        auto linear_r = Undefined(d);
-        auto linear_g = Undefined(d);
-        auto linear_b = Undefined(d);
-        XybToRgb(d, in_opsin_x, in_opsin_y, in_opsin_b,
-                 output_encoding_info.opsin_params, &linear_r, &linear_g,
-                 &linear_b);
-        Store(TF_HLG().EncodedFromDisplay(d, linear_r), d, row0 + x);
-        Store(TF_HLG().EncodedFromDisplay(d, linear_g), d, row1 + x);
-        Store(TF_HLG().EncodedFromDisplay(d, linear_b), d, row2 + x);
-      }
-    } else if (output_encoding_info.color_encoding.tf.Is709()) {
-      for (size_t x = 0; x < rect.xsize(); x += Lanes(d)) {
-        const auto in_opsin_x = Load(d, row0 + x);
-        const auto in_opsin_y = Load(d, row1 + x);
-        const auto in_opsin_b = Load(d, row2 + x);
-        JXL_COMPILER_FENCE;
-        auto linear_r = Undefined(d);
-        auto linear_g = Undefined(d);
-        auto linear_b = Undefined(d);
-        XybToRgb(d, in_opsin_x, in_opsin_y, in_opsin_b,
-                 output_encoding_info.opsin_params, &linear_r, &linear_g,
-                 &linear_b);
-        Store(TF_709().EncodedFromDisplay(d, linear_r), d, row0 + x);
-        Store(TF_709().EncodedFromDisplay(d, linear_g), d, row1 + x);
-        Store(TF_709().EncodedFromDisplay(d, linear_b), d, row2 + x);
-      }
-    } else if (output_encoding_info.color_encoding.tf.IsGamma() ||
-               output_encoding_info.color_encoding.tf.IsDCI()) {
-      auto gamma_tf = [&](hwy::HWY_NAMESPACE::Vec<decltype(d)> v) {
-        return IfThenZeroElse(
-            v <= Set(d, 1e-5f),
-            FastPowf(d, v, Set(d, output_encoding_info.inverse_gamma)));
-      };
-      for (size_t x = 0; x < rect.xsize(); x += Lanes(d)) {
-#if MEMORY_SANITIZER
-        const auto mask = Iota(d, x) < Set(d, rect.xsize());
-        const auto sentinel = Set(d, kSanitizerSentinel);
-        const auto in_opsin_x = IfThenElse(mask, Load(d, row0 + x), sentinel);
-        const auto in_opsin_y = IfThenElse(mask, Load(d, row1 + x), sentinel);
-        const auto in_opsin_b = IfThenElse(mask, Load(d, row2 + x), sentinel);
-#else
-        const auto in_opsin_x = Load(d, row0 + x);
-        const auto in_opsin_y = Load(d, row1 + x);
-        const auto in_opsin_b = Load(d, row2 + x);
-#endif
-        JXL_COMPILER_FENCE;
-        auto linear_r = Undefined(d);
-        auto linear_g = Undefined(d);
-        auto linear_b = Undefined(d);
-        XybToRgb(d, in_opsin_x, in_opsin_y, in_opsin_b,
-                 output_encoding_info.opsin_params, &linear_r, &linear_g,
-                 &linear_b);
-        Store(gamma_tf(linear_r), d, row0 + x);
-        Store(gamma_tf(linear_g), d, row1 + x);
-        Store(gamma_tf(linear_b), d, row2 + x);
-      }
-    } else {
-      // This is a programming error.
-      JXL_ABORT("Invalid target encoding");
+    // All calculations are lane-wise, still some might require value-dependent
+    // behaviour (e.g. NearestInt). Temporary unposion last vector tail.
+    msan::UnpoisonMemory(row0 + xsize, sizeof(float) * (xsize_v - xsize));
+    msan::UnpoisonMemory(row1 + xsize, sizeof(float) * (xsize_v - xsize));
+    msan::UnpoisonMemory(row2 + xsize, sizeof(float) * (xsize_v - xsize));
+    for (size_t x = 0; x < rect.xsize(); x += Lanes(d)) {
+      const auto in_opsin_x = Load(d, row0 + x);
+      const auto in_opsin_y = Load(d, row1 + x);
+      const auto in_opsin_b = Load(d, row2 + x);
+      JXL_COMPILER_FENCE;
+      auto linear_r = Undefined(d);
+      auto linear_g = Undefined(d);
+      auto linear_b = Undefined(d);
+      XybToRgb(d, in_opsin_x, in_opsin_y, in_opsin_b,
+               output_encoding_info.opsin_params, &linear_r, &linear_g,
+               &linear_b);
+      Store(op.Transform(d, linear_r), d, row0 + x);
+      Store(op.Transform(d, linear_g), d, row1 + x);
+      Store(op.Transform(d, linear_b), d, row2 + x);
     }
+    msan::PoisonMemory(row0 + xsize, sizeof(float) * (xsize_v - xsize));
+    msan::PoisonMemory(row1 + xsize, sizeof(float) * (xsize_v - xsize));
+    msan::PoisonMemory(row2 + xsize, sizeof(float) * (xsize_v - xsize));
+  }
+}
+
+struct OpLinear {
+  template <typename D, typename T>
+  T Transform(D d, const T& linear) {
+    return linear;
+  }
+};
+
+struct OpRgb {
+  template <typename D, typename T>
+  T Transform(D d, const T& linear) {
+#if JXL_HIGH_PRECISION
+    return TF_SRGB().EncodedFromDisplay(d, linear);
+#else
+    return FastLinearToSRGB(d, linear);
+#endif
+  }
+};
+
+struct OpPq {
+  template <typename D, typename T>
+  T Transform(D d, const T& linear) {
+    return TF_PQ().EncodedFromDisplay(d, linear);
+  }
+};
+
+struct OpHlg {
+  template <typename D, typename T>
+  T Transform(D d, const T& linear) {
+    return TF_HLG().EncodedFromDisplay(d, linear);
+  }
+};
+
+struct Op709 {
+  template <typename D, typename T>
+  T Transform(D d, const T& linear) {
+    return TF_709().EncodedFromDisplay(d, linear);
+  }
+};
+
+struct OpGamma {
+  const float inverse_gamma;
+  template <typename D, typename T>
+  T Transform(D d, const T& linear) {
+    return IfThenZeroElse(linear <= Set(d, 1e-5f),
+                          FastPowf(d, linear, Set(d, inverse_gamma)));
+  }
+};
+
+Status UndoXYBInPlace(Image3F* idct, const Rect& rect,
+                      const OutputEncodingInfo& output_encoding_info) {
+  PROFILER_ZONE("UndoXYB");
+
+  if (output_encoding_info.color_encoding.tf.IsLinear()) {
+    DoUndoXYBInPlace(idct, rect, OpLinear(), output_encoding_info);
+  } else if (output_encoding_info.color_encoding.tf.IsSRGB()) {
+    DoUndoXYBInPlace(idct, rect, OpRgb(), output_encoding_info);
+  } else if (output_encoding_info.color_encoding.tf.IsPQ()) {
+    DoUndoXYBInPlace(idct, rect, OpPq(), output_encoding_info);
+  } else if (output_encoding_info.color_encoding.tf.IsHLG()) {
+    DoUndoXYBInPlace(idct, rect, OpHlg(), output_encoding_info);
+  } else if (output_encoding_info.color_encoding.tf.Is709()) {
+    DoUndoXYBInPlace(idct, rect, Op709(), output_encoding_info);
+  } else if (output_encoding_info.color_encoding.tf.IsGamma() ||
+             output_encoding_info.color_encoding.tf.IsDCI()) {
+    OpGamma op = {output_encoding_info.inverse_gamma};
+    DoUndoXYBInPlace(idct, rect, op, output_encoding_info);
+  } else {
+    // This is a programming error.
+    JXL_ABORT("Invalid target encoding");
   }
   return true;
 }
@@ -252,25 +226,21 @@ void FloatToRGBA8(const Image3F& input, const Rect& input_rect, bool is_rgba,
     auto zero = Zero(d);
     auto one = Set(d, 1.0f);
     auto mul = Set(d, 255.0f);
-#if MEMORY_SANITIZER
-    // Avoid use-of-uninitialized-value for loads past the end of the image's
-    // initialized data.
-    auto safe_load = [&](const float* ptr, size_t x) {
-      uint32_t kMask[8] = {~0u, ~0u, ~0u, ~0u, 0, 0, 0, 0};
-      size_t n = std::min<size_t>(Lanes(d), output_buf_rect.xsize() - x);
-      auto mask = BitCast(d, LoadU(du, kMask + Lanes(d) - n));
-      return Load(d, ptr + x) & mask;
-    };
-#else
-    auto safe_load = [](const float* ptr, size_t x) {
-      return Load(D(), ptr + x);
-    };
-#endif
-    for (size_t x = 0; x < output_buf_rect.xsize(); x += Lanes(d)) {
-      auto rf = Clamp(zero, safe_load(row_in_r, x), one) * mul;
-      auto gf = Clamp(zero, safe_load(row_in_g, x), one) * mul;
-      auto bf = Clamp(zero, safe_load(row_in_b, x), one) * mul;
-      auto af = row_in_a ? Clamp(zero, safe_load(row_in_a, x), one) * mul
+
+    // All calculations are lane-wise, still some might require value-dependent
+    // behaviour (e.g. NearestInt). Temporary unposion last vector tail.
+    size_t xsize = output_buf_rect.xsize();
+    size_t xsize_v = RoundUpTo(xsize, Lanes(d));
+    msan::UnpoisonMemory(row_in_r + xsize, sizeof(float) * (xsize_v - xsize));
+    msan::UnpoisonMemory(row_in_g + xsize, sizeof(float) * (xsize_v - xsize));
+    msan::UnpoisonMemory(row_in_b + xsize, sizeof(float) * (xsize_v - xsize));
+    if (row_in_a)
+      msan::UnpoisonMemory(row_in_a + xsize, sizeof(float) * (xsize_v - xsize));
+    for (size_t x = 0; x < xsize; x += Lanes(d)) {
+      auto rf = Clamp(zero, Load(d, row_in_r + x), one) * mul;
+      auto gf = Clamp(zero, Load(d, row_in_g + x), one) * mul;
+      auto bf = Clamp(zero, Load(d, row_in_b + x), one) * mul;
+      auto af = row_in_a ? Clamp(zero, Load(d, row_in_a + x), one) * mul
                          : Set(d, 255.0f);
       auto r8 = U8FromU32(BitCast(du, NearestInt(rf)));
       auto g8 = U8FromU32(BitCast(du, NearestInt(gf)));
@@ -285,23 +255,56 @@ void FloatToRGBA8(const Image3F& input, const Rect& input_rect, bool is_rgba,
                   output_buf + base_ptr + bytes * x);
       }
     }
+    msan::PoisonMemory(row_in_r + xsize, sizeof(float) * (xsize_v - xsize));
+    msan::PoisonMemory(row_in_g + xsize, sizeof(float) * (xsize_v - xsize));
+    msan::PoisonMemory(row_in_b + xsize, sizeof(float) * (xsize_v - xsize));
+    if (row_in_a)
+      msan::PoisonMemory(row_in_a + xsize, sizeof(float) * (xsize_v - xsize));
   }
 }
 
+// Upsample in horizonal (if hs=1) and vertical (if vs=1) the plane_in image
+// to the output plane_out image.
+// The output region "rect" in plane_out and a border around it of lf.Padding()
+// will be generated, as long as those pixels fall inside the image frame.
+// Otherwise the border pixels that fall outside the image frame in plane_out
+// are undefined.
+// "rect" is an area inside the plane_out image which corresponds to the
+// "frame_rect" area in the frame. plane_in and plane_out both are expected to
+// have a padding of kGroupDataXBorder and kGroupDataYBorder on either side of
+// X and Y coordinates. This means that when upsampling vertically the plane_out
+// row `kGroupDataXBorder + N` will be generated from the plane_in row
+// `kGroupDataXBorder + N / 2` (and a previous or next row).
 void DoYCbCrUpsampling(size_t hs, size_t vs, ImageF* plane_in, const Rect& rect,
                        const Rect& frame_rect, const FrameDimensions& frame_dim,
                        ImageF* plane_out, const LoopFilter& lf, ImageF* temp) {
+  JXL_DASSERT(SameSize(rect, frame_rect));
+  JXL_DASSERT(hs <= 1 && vs <= 1);
   // The pixel in (xoff, yoff) is the origin of the downsampling coordinate
   // system.
   size_t xoff = PassesDecoderState::kGroupDataXBorder;
   size_t yoff = PassesDecoderState::kGroupDataYBorder;
-  // This may over-copy, but it should always be safe to do so.
-  size_t y0 = rect.y0() - lf.Padding();
-  size_t y1 = rect.y0() + rect.ysize() + lf.Padding();
-  size_t x0 = rect.x0() - lf.Padding();
-  size_t x1 = rect.x0() + rect.xsize() + lf.Padding();
+
+  // This X,Y range is the intersection between the requested "rect" expanded
+  // with a lf.Padding() all around and the image frame translated to the
+  // coordinate system used by plane_out.
+  // All the pixels in the [x0, x1) x [y0, y1) range must be defined in the
+  // plane_out output at the end.
+  const size_t y0 = rect.y0() - std::min<size_t>(lf.Padding(), frame_rect.y0());
+  const size_t y1 = rect.y0() +
+                    std::min(frame_rect.y0() + rect.ysize() + lf.Padding(),
+                             frame_dim.ysize_padded) -
+                    frame_rect.y0();
+
+  const size_t x0 = rect.x0() - std::min<size_t>(lf.Padding(), frame_rect.x0());
+  const size_t x1 = rect.x0() +
+                    std::min(frame_rect.x0() + rect.xsize() + lf.Padding(),
+                             frame_dim.xsize_padded) -
+                    frame_rect.x0();
+
   if (hs == 0 && vs == 0) {
     Rect r(x0, y0, x1 - x0, y1 - y0);
+    JXL_CHECK_IMAGE_INITIALIZED(*plane_in, r);
     CopyImageTo(r, *plane_in, r, plane_out);
     return;
   }
@@ -313,8 +316,8 @@ void DoYCbCrUpsampling(size_t hs, size_t vs, ImageF* plane_in, const Rect& rect,
       plane_in->Row(y)[rect.x0() - 1] = plane_in->Row(y)[rect.x0()];
     }
   }
-  if (frame_rect.x0() + frame_rect.xsize() >= frame_dim.xsize_padded) {
-    size_t borderx = ((rect.x0() + rect.xsize() - xoff) >> hs) + xoff;
+  if (frame_rect.x0() + x1 - rect.x0() >= frame_dim.xsize_padded) {
+    ssize_t borderx = static_cast<ssize_t>(x1 - xoff + hs) / (1 << hs) + xoff;
     for (size_t y = 0; y < plane_in->ysize(); y++) {
       plane_in->Row(y)[borderx] = plane_in->Row(y)[borderx - 1];
     }
@@ -323,10 +326,8 @@ void DoYCbCrUpsampling(size_t hs, size_t vs, ImageF* plane_in, const Rect& rect,
     memcpy(plane_in->Row(rect.y0() - 1), plane_in->Row(rect.y0()),
            plane_in->xsize() * sizeof(float));
   }
-  if (frame_rect.y0() + frame_rect.ysize() >= frame_dim.ysize_padded) {
-    ssize_t bordery =
-        static_cast<ssize_t>(rect.y0() + rect.ysize() - yoff) / (1 << vs) +
-        yoff;
+  if (frame_rect.y0() + y1 - rect.y0() >= frame_dim.ysize_padded) {
+    ssize_t bordery = static_cast<ssize_t>(y1 - yoff + vs) / (1 << vs) + yoff;
     memcpy(plane_in->Row(bordery), plane_in->Row(bordery - 1),
            plane_in->xsize() * sizeof(float));
   }
@@ -396,6 +397,10 @@ void DoYCbCrUpsampling(size_t hs, size_t vs, ImageF* plane_in, const Rect& rect,
   } else {
     CopyImageTo(*temp, plane_out);
   }
+
+  // The output must be initialized including the lf.Padding() around the image
+  // for all the pixels that fall inside the image frame.
+  JXL_CHECK_IMAGE_INITIALIZED(*plane_out, Rect(x0, y0, x1 - x0, y1 - y0));
 }
 
 // NOLINTNEXTLINE(google-readability-namespace-comments)
@@ -599,6 +604,8 @@ Status FinalizeImageRect(
   Rect rect_for_if_storage = frame_rect;
   Rect rect_for_upsampling = frame_rect;
   Rect rect_for_if_input = input_rect;
+  // The same as rect_for_if_input but in the frame coordinates.
+  Rect frame_rect_for_ycbcr_upsampling = frame_rect;
   size_t extra_rows_t = 0;
   size_t extra_rows_b = 0;
   if (frame_header.upsampling != 1) {
@@ -644,6 +651,9 @@ Status FinalizeImageRect(
     rect_for_if_input =
         Rect(input_rect.x0() - ifbx0, input_rect.y0() - ifby0,
              rect_for_if_storage.xsize(), rect_for_if_storage.ysize());
+    frame_rect_for_ycbcr_upsampling =
+        Rect(frame_rect.x0() - ifbx0, frame_rect.y0() - ifby0,
+             rect_for_if_input.xsize(), rect_for_if_input.ysize());
     storage_for_if = &dec_state->upsampling_input_storage[thread];
   }
 
@@ -656,8 +666,13 @@ Status FinalizeImageRect(
     for (size_t c = 0; c < 3; c++) {
       size_t vs = frame_header.chroma_subsampling.VShift(c);
       size_t hs = frame_header.chroma_subsampling.HShift(c);
+      // The per-thread output is used for the first time here. Poison the temp
+      // image on this thread to prevent leaking initialized data from a
+      // previous run in this thread in msan builds.
+      msan::PoisonImage(dec_state->ycbcr_out_images[thread].Plane(c));
       HWY_DYNAMIC_DISPATCH(DoYCbCrUpsampling)
-      (hs, vs, &input_image->Plane(c), rect_for_if_input, frame_rect, frame_dim,
+      (hs, vs, &input_image->Plane(c), rect_for_if_input,
+       frame_rect_for_ycbcr_upsampling, frame_dim,
        &dec_state->ycbcr_out_images[thread].Plane(c), lf,
        &dec_state->ycbcr_temp_images[thread]);
     }
@@ -680,13 +695,8 @@ Status FinalizeImageRect(
   FilterPipeline* fp = nullptr;
   ssize_t ensure_padding_filter_y0 = 0;
   ssize_t ensure_padding_filter_y1 = 0;
-  Rect image_padded_rect;
   if (lf.epf_iters != 0 || lf.gab) {
     fp = &dec_state->filter_pipelines[thread];
-    size_t xextra =
-        rect_for_if_input.x0() % GroupBorderAssigner::kPaddingXRound;
-    image_padded_rect = Rect(rect_for_if.x0() - xextra, rect_for_if.y0(),
-                             rect_for_if.xsize() + xextra, rect_for_if.ysize());
   }
 
   // +----------------------------- STEP 2 ------------------------------+
@@ -829,27 +839,14 @@ Status FinalizeImageRect(
   // | Set up the filter pipeline.                                       |
   // +-------------------------------------------------------------------+
   if (fp) {
-    // If `rect_for_if_input` does not start at a multiple of
-    // GroupBorderAssigner::kPaddingXRound, we extend the rect we run EPF on by
-    // one full padding length to ensure sigma is handled correctly. We also
-    // extend the output and image rects accordingly. To do this, we need 2x the
-    // border.
-    size_t xextra =
-        rect_for_if_input.x0() % GroupBorderAssigner::kPaddingXRound;
-    Rect filter_input_padded_rect(
-        rect_for_if_input.x0() - xextra, rect_for_if_input.y0(),
-        rect_for_if_input.xsize() + xextra, rect_for_if_input.ysize());
     ensure_padding_filter.Init(
         input, rect_for_if_input, rect_for_if, frame_dim.xsize_padded,
         frame_dim.ysize_padded, lf.Padding(), lf.Padding(),
         &ensure_padding_filter_y0, &ensure_padding_filter_y1);
-    Rect filter_output_padded_rect(
-        rect_for_if_storage.x0() - xextra, rect_for_if_storage.y0(),
-        rect_for_if_storage.xsize() + xextra, rect_for_if_storage.ysize());
-    fp = PrepareFilterPipeline(dec_state, image_padded_rect, *input,
-                               filter_input_padded_rect, frame_dim.ysize_padded,
-                               thread, storage_for_if,
-                               filter_output_padded_rect);
+
+    fp = PrepareFilterPipeline(dec_state, rect_for_if, *input,
+                               rect_for_if_input, frame_dim.ysize_padded,
+                               thread, storage_for_if, rect_for_if_storage);
   }
 
   // +----------------------------- STEP 5 ------------------------------+
@@ -878,7 +875,7 @@ Status FinalizeImageRect(
       if (y >= first_ensure_padding_y && y < ensure_padding_filter_y1) {
         ensure_padding_filter.Process3(y);
       }
-      fp->ApplyFiltersRow(lf, dec_state->filter_weights, image_padded_rect, y);
+      fp->ApplyFiltersRow(lf, dec_state->filter_weights, y);
     } else if (output_pixel_data_storage != input) {
       for (size_t c = 0; c < 3; c++) {
         memcpy(rect_for_if_storage.PlaneRow(storage_for_if, c, y),
@@ -1130,6 +1127,9 @@ Status FinalizeFrameDecoding(ImageBundle* decoded,
                 rects_to_process[rect_id].ysize() >>
                     frame_header.chroma_subsampling.VShift(c));
         Rect group_data_rect(xstart, ystart, rh.xsize(), rh.ysize());
+        // Poison the image in this thread to prevent leaking initialized data
+        // from a previous run in this thread in msan builds.
+        msan::PoisonImage(dec_state->group_data[thread].Plane(c));
         CopyImageToWithPadding(
             rh, dec_state->decoded.Plane(c), dec_state->FinalizeRectPadding(),
             group_data_rect, &dec_state->group_data[thread].Plane(c));
@@ -1146,6 +1146,9 @@ Status FinalizeFrameDecoding(ImageBundle* decoded,
               &dec_state
                    ->ec_temp_images[thread * decoded->extra_channels().size() +
                                     i];
+          // Poison the temp image on this thread to prevent leaking initialized
+          // data from a previous run in this thread in msan builds.
+          msan::PoisonImage(*eti);
           CopyImageToWithPadding(r, dec_state->extra_channels[i],
                                  /*padding=*/2, ec_input_rect, eti);
           ec_rects.emplace_back(eti, ec_input_rect);
@@ -1189,20 +1192,21 @@ Status FinalizeFrameDecoding(ImageBundle* decoded,
     decoded->SetFromImage(Image3F(frame_header.nonserialized_metadata->xsize(),
                                   frame_header.nonserialized_metadata->ysize()),
                           foreground.c_current());
-    std::vector<std::pair<ImageF*, Rect>> extra_channels;
-    extra_channels.reserve(foreground.extra_channels().size());
+    std::vector<Rect> extra_channels_rects;
+    decoded->extra_channels().reserve(foreground.extra_channels().size());
+    extra_channels_rects.reserve(foreground.extra_channels().size());
     for (size_t i = 0; i < foreground.extra_channels().size(); ++i) {
       decoded->extra_channels().emplace_back(
           frame_header.nonserialized_metadata->xsize(),
           frame_header.nonserialized_metadata->ysize());
-      extra_channels.emplace_back(&decoded->extra_channels().back(),
-                                  Rect(decoded->extra_channels().back()));
+      extra_channels_rects.emplace_back(decoded->extra_channels().back());
     }
     JXL_RETURN_IF_ERROR(blender.PrepareBlending(
         dec_state, foreground.origin, foreground.xsize(), foreground.ysize(),
         &frame_header.nonserialized_metadata->m.extra_channel_info,
         foreground.c_current(), Rect(*decoded->color()),
-        /*output=*/decoded->color(), Rect(*decoded->color()), extra_channels));
+        /*output=*/decoded->color(), Rect(*decoded->color()),
+        &decoded->extra_channels(), std::move(extra_channels_rects)));
 
     std::vector<Rect> rects_to_process;
     for (size_t y = 0; y < frame_dim.ysize; y += kGroupDim) {

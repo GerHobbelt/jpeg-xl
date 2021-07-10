@@ -30,12 +30,6 @@
 namespace jxl {
 // Some enums and typedefs used by more than one header file.
 
-#ifdef MEMORY_SANITIZER
-// Chosen so that kSanitizerSentinel is four copies of kSanitizerSentinelByte.
-constexpr uint8_t kSanitizerSentinelByte = 0x48;
-constexpr float kSanitizerSentinel = 205089.125f;
-#endif
-
 constexpr size_t kBitsPerByte = 8;  // more clear than CHAR_BIT
 
 constexpr inline size_t RoundUpBitsToByteMultiple(size_t bits) {
@@ -168,7 +162,8 @@ JXL_INLINE T Clamp1(T val, T low, T hi) {
 }
 
 // Encodes non-negative (X) into (2 * X), negative (-X) into (2 * X - 1)
-constexpr uint32_t PackSigned(int32_t value) {
+constexpr uint32_t PackSigned(int32_t value)
+    JXL_NO_SANITIZE("unsigned-integer-overflow") {
   return (static_cast<uint32_t>(value) << 1) ^
          ((static_cast<uint32_t>(~value) >> 31) - 1);
 }

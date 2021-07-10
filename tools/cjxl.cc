@@ -19,6 +19,7 @@
 #include "lib/extras/codec_jpg.h"
 #endif
 
+#include "lib/extras/time.h"
 #include "lib/jxl/aux_out.h"
 #include "lib/jxl/base/cache_aligned.h"
 #include "lib/jxl/base/compiler_specific.h"
@@ -27,7 +28,6 @@
 #include "lib/jxl/base/profiler.h"
 #include "lib/jxl/base/status.h"
 #include "lib/jxl/base/thread_pool_internal.h"
-#include "lib/jxl/base/time.h"
 #include "lib/jxl/codec_in_out.h"
 #include "lib/jxl/common.h"
 #include "lib/jxl/enc_cache.h"
@@ -59,6 +59,9 @@ static inline bool ParseColorTransform(const char* arg,
 }
 static inline bool ParseIntensityTarget(const char* arg, float* out) {
   return ParseFloat(arg, out) && *out > 0;
+}
+static inline bool ParsePhotonNoiseParameter(const char* arg, float* out) {
+  return strncmp(arg, "ISO", 3) == 0 && ParseFloat(arg + 3, out) && *out > 0;
 }
 
 // Proposes a distance to try for a given bpp target. This could depend
@@ -361,9 +364,16 @@ void CompressArgs::AddCommandLineOptions(CommandLineParser* cmdline) {
                           "pixels (default: 1 if lossless, 0 if lossy).",
                           &params.keep_invisible, &ParseOverride, 1);
 
-  cmdline->AddOptionFlag('\0', "middleout",
+  cmdline->AddOptionFlag('\0', "centerfirst",
                          "Put center groups first in the compressed file.",
-                         &params.middleout, &SetBooleanTrue, 1);
+                         &params.centerfirst, &SetBooleanTrue, 1);
+
+  cmdline->AddOptionValue('\0', "center_x", "0..XSIZE",
+                          "Put center groups first in the compressed file.",
+                          &params.center_x, &ParseUnsigned, 1);
+  cmdline->AddOptionValue('\0', "center_y", "0..YSIZE",
+                          "Put center groups first in the compressed file.",
+                          &params.center_y, &ParseUnsigned, 1);
 
   // Flags.
   cmdline->AddOptionFlag('\0', "progressive_ac",
@@ -397,6 +407,13 @@ void CompressArgs::AddCommandLineOptions(CommandLineParser* cmdline) {
   cmdline->AddOptionValue('\0', "noise", "0|1",
                           "force disable/enable noise generation.",
                           &params.noise, &ParseOverride, 1);
+  cmdline->AddOptionValue(
+      '\0', "photon_noise", "ISO3200",
+      "Set the noise to approximately what it would be at a given nominal "
+      "exposure on a 35mm camera. For formats other than 35mm, or when the "
+      "whole sensor was not used, you can multiply the ISO value by the "
+      "equivalence ratio squared, for example by 2.25 for an APS-C camera.",
+      &params.photon_noise_iso, &ParsePhotonNoiseParameter, 0);
   cmdline->AddOptionValue('\0', "dots", "0|1",
                           "force disable/enable dots generation.", &params.dots,
                           &ParseOverride, 1);

@@ -802,6 +802,11 @@ cmd_ossfuzz_ninja() {
   [[ -e "${BUILD_DIR}/build.ninja" ]]
   local real_build_dir=$(realpath "${BUILD_DIR}")
 
+  if [[ -e "${BUILD_DIR}/msan" ]]; then
+    echo "ossfuzz_ninja doesn't work with msan builds. Use ossfuzz_msan." >&2
+    exit 1
+  fi
+
   sudo docker run --rm -i \
     --user $(id -u):$(id -g) \
     -v "${MYDIR}":/src/libjxl \
@@ -1201,7 +1206,7 @@ cmd_lint() {
     fi
     installed+=("${clang_format}")
     local tmppatch="${tmpdir}/${clang_format}.patch"
-    # We include in this linter all the changes including the uncommited changes
+    # We include in this linter all the changes including the uncommitted changes
     # to avoid printing changes already applied.
     set -x
     git -C "${MYDIR}" "${clang_format}" --binary "${clang_format}" \

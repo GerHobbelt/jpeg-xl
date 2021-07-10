@@ -234,13 +234,13 @@ TEST(JxlTest, RoundtripResample2MT) {
   cparams.resampling = 2;
   DecompressParams dparams;
   CodecInOut io2;
-  EXPECT_LE(Roundtrip(&io, cparams, dparams, &pool, &io2), 55000);
+  EXPECT_LE(Roundtrip(&io, cparams, dparams, &pool, &io2), 57000);
   EXPECT_LE(ButteraugliDistance(io, io2, cparams.ba_params,
                                 /*distmap=*/nullptr, &pool),
 #if JXL_HIGH_PRECISION
             4.5);
 #else
-            10);
+            12.5);
 #endif
 }
 
@@ -733,7 +733,7 @@ TEST(JxlTest, RoundtripAlpha) {
   CodecInOut io2;
   EXPECT_TRUE(DecodeFile(dparams, compressed, &io2, pool));
 
-  EXPECT_LE(compressed.size(), 10000);
+  EXPECT_LE(compressed.size(), 10077);
 
   EXPECT_LE(ButteraugliDistance(io, io2, cparams.ba_params,
                                 /*distmap=*/nullptr, pool),

@@ -818,7 +818,7 @@ TEST(DecodeTest, DefaultParallelRunnerTest) {
 
 // Creates the header of a JPEG XL file with various custom parameters for
 // testing.
-// xsize, ysize: image dimentions to store in the SizeHeader, max 512.
+// xsize, ysize: image dimensions to store in the SizeHeader, max 512.
 // bits_per_sample, orientation: a selection of header parameters to test with.
 // orientation: image orientation to set in the metadata
 // alpha_bits: if non-0, alpha extra channel bits to set in the metadata. Also
@@ -1873,7 +1873,7 @@ TEST(DecodeTest, PixelTestOpaqueSrgbLossyNoise) {
 
     jxl::ButteraugliParams ba;
     EXPECT_LE(ButteraugliDistance(io0, io1, ba, /*distmap=*/nullptr, nullptr),
-              2.4f);
+              2.6f);
 
     JxlDecoderDestroy(dec);
   }
