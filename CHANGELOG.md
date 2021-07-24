@@ -5,11 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [Unreleased - to be released in 0.5.0]
 ### Added
  - API: New function to decode the image using a callback outputting a part of a
    row per call.
  - API: 16-bit float output support.
+ - API: `JxlDecoderRewind` and `JxlDecoderSkipFrames` functions to skip more
+   efficiently to earlier animation frames.
+ - API: `JxlDecoderSetPreferredColorProfile` function to choose color profile in
+   certain circumstances.
+ - encoder: Adding `center_x` and `center_y` flags for more control of the tile order. 
 
 ### Changed
  - Full JPEG XL part 1 specification support: Implemented all the spec required
