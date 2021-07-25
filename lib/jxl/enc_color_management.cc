@@ -38,8 +38,8 @@
 #if JPEGXL_ENABLE_SKCMS
 #include "skcms.h"
 #else  // JPEGXL_ENABLE_SKCMS
-#include "lcms2.h"
-#include "lcms2_plugin.h"
+#include "lcms2mt.h"
+#include "lcms2mt_plugin.h"
 #endif  // JPEGXL_ENABLE_SKCMS
 
 #define JXL_CMS_VERBOSE 0
@@ -48,6 +48,31 @@
 // 1 only on the last pass.
 #ifndef LIB_JXL_ENC_COLOR_MANAGEMENT_CC_
 #define LIB_JXL_ENC_COLOR_MANAGEMENT_CC_
+
+#if !JPEGXL_ENABLE_SKCMS
+
+namespace {
+
+void ErrorHandler(cmsContext context, cmsUInt32Number code, const char* text) {
+  JXL_WARNING("LCMS error %u: %s", code, text);
+}
+
+// Returns a context for the current thread, creating it if necessary.
+cmsContext GetContext() {
+  static thread_local void* context_;
+  if (context_ == nullptr) {
+    context_ = cmsCreateContext(nullptr, nullptr);
+    JXL_ASSERT(context_ != nullptr);
+
+    cmsSetLogErrorHandler(static_cast<cmsContext>(context_), &ErrorHandler);
+  }
+  return static_cast<cmsContext>(context_);
+}
+
+}  // namespace
+
+#endif  // !JPEGXL_ENABLE_SKCMS
+
 
 namespace jxl {
 #if JPEGXL_ENABLE_SKCMS
@@ -177,6 +202,8 @@ void DoColorSpaceTransform(ColorSpaceTransform* t, const size_t thread,
                            const float* buf_src, float* buf_dst) {
   // No lock needed.
 
+  const cmsContext context = GetContext();
+
   float* xform_src = const_cast<float*>(buf_src);  // Read-only.
   if (t->preprocess_ != ExtraTF::kNone) {
     xform_src = t->buf_src_.Row(thread);  // Writable buffer.
@@ -201,7 +228,7 @@ void DoColorSpaceTransform(ColorSpaceTransform* t, const size_t thread,
         &t->skcms_icc_->profile_src_, buf_dst, skcms_PixelFormat_RGB_fff,
         skcms_AlphaFormat_Opaque, &t->skcms_icc_->profile_dst_, t->xsize_));
 #else   // JPEGXL_ENABLE_SKCMS
-    cmsDoTransform(t->lcms_transform_, xform_src, buf_dst,
+    cmsDoTransform(context, t->lcms_transform_, xform_src, buf_dst,
                    static_cast<cmsUInt32Number>(t->xsize_));
 #endif  // JPEGXL_ENABLE_SKCMS
   }
@@ -266,7 +293,8 @@ JXL_MUST_USE_RESULT CIExy CIExyFromxyY(const cmsCIExyY& xyY) {
 
 JXL_MUST_USE_RESULT CIExy CIExyFromXYZ(const cmsCIEXYZ& XYZ) {
   cmsCIExyY xyY;
-  cmsXYZ2xyY(/*Dest=*/&xyY, /*Source=*/&XYZ);
+  const cmsContext context = GetContext();
+  cmsXYZ2xyY(context, /*Dest=*/&xyY, /*Source=*/&XYZ);
   return CIExyFromxyY(xyY);
 }
 
@@ -283,23 +311,32 @@ JXL_MUST_USE_RESULT cmsCIExyY xyYFromCIExy(const CIExy& xy) {
 // RAII
 
 struct ProfileDeleter {
-  void operator()(void* p) { cmsCloseProfile(p); }
+  void operator()(void* p) {
+    const cmsContext context = GetContext();
+    cmsCloseProfile(context, p);
+  }
 };
 using Profile = std::unique_ptr<void, ProfileDeleter>;
 
 struct TransformDeleter {
-  void operator()(void* p) { cmsDeleteTransform(p); }
+  void operator()(void* p) {
+    const cmsContext context = GetContext();
+    cmsDeleteTransform(context, p);
+  }
 };
 using Transform = std::unique_ptr<void, TransformDeleter>;
 
 struct CurveDeleter {
-  void operator()(cmsToneCurve* p) { cmsFreeToneCurve(p); }
+  void operator()(cmsToneCurve* p) {
+    const cmsContext context = GetContext();
+    cmsFreeToneCurve(context, p);
+  }
 };
 using Curve = std::unique_ptr<cmsToneCurve, CurveDeleter>;
 
 Status CreateProfileXYZ(const cmsContext context,
                         Profile* JXL_RESTRICT profile) {
-  profile->reset(cmsCreateXYZProfileTHR(context));
+  profile->reset(cmsCreateXYZProfile(context));
   if (profile->get() == nullptr) return JXL_FAILURE("Failed to create XYZ");
   return true;
 }
@@ -318,7 +355,7 @@ Status DecodeProfile(const PaddedBytes& icc, skcms_ICCProfile* const profile) {
 #else  // JPEGXL_ENABLE_SKCMS
 Status DecodeProfile(const cmsContext context, const PaddedBytes& icc,
                      Profile* profile) {
-  profile->reset(cmsOpenProfileFromMemTHR(context, icc.data(), icc.size()));
+  profile->reset(cmsOpenProfileFromMem(context, icc.data(), icc.size()));
   if (profile->get() == nullptr) {
     return JXL_FAILURE("Failed to decode profile");
   }
@@ -468,7 +505,8 @@ uint32_t Type64(const ColorEncoding& c) {
 }
 
 ColorSpace ColorSpaceFromProfile(const Profile& profile) {
-  switch (cmsGetColorSpace(profile.get())) {
+  const cmsContext context = GetContext();
+  switch (cmsGetColorSpace(context, profile.get())) {
     case cmsSigRgbData:
       return ColorSpace::kRGB;
     case cmsSigGrayData:
@@ -492,10 +530,10 @@ Status ProfileEquivalentToICC(const cmsContext context, const Profile& profile1,
   const uint32_t intent = INTENT_RELATIVE_COLORIMETRIC;
   const uint32_t flags = cmsFLAGS_NOOPTIMIZE | cmsFLAGS_BLACKPOINTCOMPENSATION |
                          cmsFLAGS_HIGHRESPRECALC;
-  Transform xform1(cmsCreateTransformTHR(context, profile1.get(), type_src,
+  Transform xform1(cmsCreateTransform(context, profile1.get(), type_src,
                                          profile_xyz.get(), TYPE_XYZ_DBL,
                                          intent, flags));
-  Transform xform2(cmsCreateTransformTHR(context, profile2.get(), type_src,
+  Transform xform2(cmsCreateTransform(context, profile2.get(), type_src,
                                          profile_xyz.get(), TYPE_XYZ_DBL,
                                          intent, flags));
   if (xform1 == nullptr || xform2 == nullptr) {
@@ -513,8 +551,8 @@ Status ProfileEquivalentToICC(const cmsContext context, const Profile& profile1,
   if (c.IsGray()) {
     // Finer sampling and replicate each component.
     for (in[0] = init; in[0] < 1.0; in[0] += step / 8) {
-      cmsDoTransform(xform1.get(), in, out1, 1);
-      cmsDoTransform(xform2.get(), in, out2, 1);
+      cmsDoTransform(context, xform1.get(), in, out1, 1);
+      cmsDoTransform(context, xform2.get(), in, out2, 1);
       if (!ApproxEq(out1[0], out2[0], 2E-4)) {
         return false;
       }
@@ -523,8 +561,8 @@ Status ProfileEquivalentToICC(const cmsContext context, const Profile& profile1,
     for (in[0] = init; in[0] < 1.0; in[0] += step) {
       for (in[1] = init; in[1] < 1.0; in[1] += step) {
         for (in[2] = init; in[2] < 1.0; in[2] += step) {
-          cmsDoTransform(xform1.get(), in, out1, 1);
-          cmsDoTransform(xform2.get(), in, out2, 1);
+          cmsDoTransform(context, xform1.get(), in, out1, 1);
+          cmsDoTransform(context, xform2.get(), in, out2, 1);
           for (size_t i = 0; i < 3; ++i) {
             if (!ApproxEq(out1[i], out2[i], 2E-4)) {
               return false;
@@ -564,22 +602,22 @@ JXL_MUST_USE_RESULT cmsCIEXYZ UnadaptedWhitePoint(const cmsContext context,
 
   // xy are relative, so magnitude does not matter if we ignore output Y.
   const cmsFloat64Number in[3] = {1.0, 1.0, 1.0};
-  cmsDoTransform(xform.get(), in, &XYZ.X, 1);
+  cmsDoTransform(context, xform.get(), in, &XYZ.X, 1);
   return XYZ;
 }
 
-Status IdentifyPrimaries(const Profile& profile, const cmsCIEXYZ& wp_unadapted,
+Status IdentifyPrimaries(const cmsContext context, const Profile& profile, const cmsCIEXYZ& wp_unadapted,
                          ColorEncoding* c) {
   if (!c->HasPrimaries()) return true;
   if (ColorSpaceFromProfile(profile) == ColorSpace::kUnknown) return true;
 
   // These were adapted to the profile illuminant before storing in the profile.
   const cmsCIEXYZ* adapted_r = static_cast<const cmsCIEXYZ*>(
-      cmsReadTag(profile.get(), cmsSigRedColorantTag));
+      cmsReadTag(context, profile.get(), cmsSigRedColorantTag));
   const cmsCIEXYZ* adapted_g = static_cast<const cmsCIEXYZ*>(
-      cmsReadTag(profile.get(), cmsSigGreenColorantTag));
+      cmsReadTag(context, profile.get(), cmsSigGreenColorantTag));
   const cmsCIEXYZ* adapted_b = static_cast<const cmsCIEXYZ*>(
-      cmsReadTag(profile.get(), cmsSigBlueColorantTag));
+      cmsReadTag(context, profile.get(), cmsSigBlueColorantTag));
   if (adapted_r == nullptr || adapted_g == nullptr || adapted_b == nullptr) {
     return JXL_FAILURE("Failed to retrieve colorants");
   }
@@ -589,9 +627,9 @@ Status IdentifyPrimaries(const Profile& profile, const cmsCIEXYZ& wp_unadapted,
   const cmsCIEXYZ d50 = D50_XYZ();
 
   cmsCIEXYZ r, g, b;
-  cmsAdaptToIlluminant(&r, &d50, &wp_unadapted, adapted_r);
-  cmsAdaptToIlluminant(&g, &d50, &wp_unadapted, adapted_g);
-  cmsAdaptToIlluminant(&b, &d50, &wp_unadapted, adapted_b);
+  cmsAdaptToIlluminant(context, &r, &d50, &wp_unadapted, adapted_r);
+  cmsAdaptToIlluminant(context, &g, &d50, &wp_unadapted, adapted_g);
+  cmsAdaptToIlluminant(context, &b, &d50, &wp_unadapted, adapted_b);
 
   const PrimariesCIExy rgb = {CIExyFromXYZ(r), CIExyFromXYZ(g),
                               CIExyFromXYZ(b)};
@@ -616,22 +654,6 @@ void DetectTransferFunction(const cmsContext context, const Profile& profile,
   }
 
   c->tf.SetTransferFunction(TransferFunction::kUnknown);
-}
-
-void ErrorHandler(cmsContext context, cmsUInt32Number code, const char* text) {
-  JXL_WARNING("LCMS error %u: %s", code, text);
-}
-
-// Returns a context for the current thread, creating it if necessary.
-cmsContext GetContext() {
-  static thread_local void* context_;
-  if (context_ == nullptr) {
-    context_ = cmsCreateContext(nullptr, nullptr);
-    JXL_ASSERT(context_ != nullptr);
-
-    cmsSetLogErrorHandlerTHR(static_cast<cmsContext>(context_), &ErrorHandler);
-  }
-  return static_cast<cmsContext>(context_);
 }
 
 #endif  // JPEGXL_ENABLE_SKCMS
@@ -686,7 +708,7 @@ Status ColorEncoding::SetFieldsFromICC() {
   JXL_RETURN_IF_ERROR(DecodeProfile(context, icc_, &profile));
 
   const cmsUInt32Number rendering_intent32 =
-      cmsGetHeaderRenderingIntent(profile.get());
+      cmsGetHeaderRenderingIntent(context, profile.get());
   if (rendering_intent32 > 3) {
     return JXL_FAILURE("Invalid rendering intent %u\n", rendering_intent32);
   }
@@ -697,7 +719,7 @@ Status ColorEncoding::SetFieldsFromICC() {
   JXL_RETURN_IF_ERROR(SetWhitePoint(CIExyFromXYZ(wp_unadapted)));
 
   // Relies on color_space.
-  JXL_RETURN_IF_ERROR(IdentifyPrimaries(profile, wp_unadapted, this));
+  JXL_RETURN_IF_ERROR(IdentifyPrimaries(context, profile, wp_unadapted, this));
 
   // Relies on color_space/white point/primaries being set already.
   DetectTransferFunction(context, profile, this);
@@ -858,7 +880,7 @@ Status ColorSpaceTransform::Init(const ColorEncoding& c_src,
   const uint32_t flags = cmsFLAGS_NOCACHE | cmsFLAGS_BLACKPOINTCOMPENSATION |
                          cmsFLAGS_HIGHRESPRECALC;
   lcms_transform_ =
-      cmsCreateTransformTHR(context, profile_src.get(), type_src,
+      cmsCreateTransform(context, profile_src.get(), type_src,
                             profile_dst.get(), type_dst, intent, flags);
   if (lcms_transform_ == nullptr) {
     return JXL_FAILURE("Failed to create transform");
