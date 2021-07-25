@@ -129,6 +129,16 @@ int CompressJpegXlMain(int argc, const char* argv[]) {
 }  // namespace tools
 }  // namespace jpegxl
 
+
+
+#if defined(BUILD_MONOLITHIC)
+#define main(cnt, arr) jpegXL_compress_main(cnt, arr)
+#endif
+
+/*
+ * The main program.
+ */
+
 int main(int argc, const char** argv) {
   return jpegxl::tools::CompressJpegXlMain(argc, argv);
 }

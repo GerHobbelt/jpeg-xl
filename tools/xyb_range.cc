@@ -75,4 +75,16 @@ void PrintXybRange() {
 }  // namespace
 }  // namespace jxl
 
-int main() { jxl::PrintXybRange(); }
+
+
+#if defined(BUILD_MONOLITHIC)
+#define main(cnt, arr) jpegXL_xyb_range_main(cnt, arr)
+#endif
+
+/*
+ * The main program.
+ */
+
+int main(int argc, const char** argv) {
+	jxl::PrintXybRange();
+}

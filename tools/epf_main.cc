@@ -12,6 +12,16 @@
 #include "tools/cmdline.h"
 #include "tools/epf.h"
 
+
+
+#if defined(BUILD_MONOLITHIC)
+#define main(cnt, arr) jpegXL_epf_main(cnt, arr)
+#endif
+
+/*
+ * The main program.
+ */
+
 int main(int argc, const char** argv) {
   float distance = 1.f;
   size_t sharpness = 1;

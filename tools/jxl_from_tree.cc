@@ -427,7 +427,7 @@ int JxlFromTree(const char* in, const char* out, const char* tree_out) {
 
   while (true) {
     PassesEncoderState enc_state;
-    enc_state.heuristics = make_unique<Heuristics>(tree);
+    enc_state.heuristics = jxl::make_unique<Heuristics>(tree);
     enc_state.shared.image_features.splines =
         SplinesFromSplineData(spline_data, enc_state.shared.cmap);
 
@@ -464,7 +464,17 @@ int JxlFromTree(const char* in, const char* out, const char* tree_out) {
 }
 }  // namespace jxl
 
-int main(int argc, char** argv) {
+
+
+#if defined(BUILD_MONOLITHIC)
+#define main(cnt, arr) jpegXL_from_tree_main(cnt, arr)
+#endif
+
+/*
+ * The main program.
+ */
+
+int main(int argc, const char** argv) {
   if ((argc != 3 && argc != 4) || !strcmp(argv[1], argv[2])) {
     fprintf(stderr, "Usage: %s tree_in.txt out.jxl [tree_drawing]\n", argv[0]);
     return 1;

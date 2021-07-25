@@ -96,7 +96,17 @@ Status RunButteraugli(const char* pathname1, const char* pathname2,
 }  // namespace
 }  // namespace jxl
 
-int main(int argc, char** argv) {
+
+
+#if defined(BUILD_MONOLITHIC)
+#define main(cnt, arr) jpegXL_butteraugli_main(cnt, arr)
+#endif
+
+/*
+ * The main program.
+ */
+
+int main(int argc, const char** argv) {
   if (argc < 3) {
     fprintf(stderr,
             "Usage: %s <reference> <distorted> [--distmap <distmap>] "

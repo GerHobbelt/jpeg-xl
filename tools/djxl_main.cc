@@ -204,6 +204,16 @@ int DecompressMain(int argc, const char* argv[]) {
 }  // namespace tools
 }  // namespace jpegxl
 
-int main(int argc, const char* argv[]) {
+
+
+#if defined(BUILD_MONOLITHIC)
+#define main(cnt, arr) jpegXL_decompress_main(cnt, arr)
+#endif
+
+/*
+ * The main program.
+ */
+
+int main(int argc, const char** argv) {
   return jpegxl::tools::DecompressMain(argc, argv);
 }

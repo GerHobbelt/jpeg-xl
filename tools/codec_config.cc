@@ -23,7 +23,7 @@ std::string CodecConfigString(uint32_t lib_version) {
     config += version_str;
   }
 
-  std::string version = JPEGXL_VERSION;
+  std::string version = JPEGXL_LIBRARY_VERSION;
   if (version != "(unknown)") {
     config += version + ' ';
   }

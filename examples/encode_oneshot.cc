@@ -235,7 +235,17 @@ bool WriteFile(const std::vector<uint8_t>& bytes, const char* filename) {
   return true;
 }
 
-int main(int argc, char* argv[]) {
+
+
+#if defined(BUILD_MONOLITHIC)
+#define main(cnt, arr) jpegXL_encode_oneshot_main(cnt, arr)
+#endif
+
+/*
+ * The main program.
+ */
+
+int main(int argc, const char** argv) {
   if (argc != 3) {
     fprintf(stderr,
             "Usage: %s <pfm> <jxl>\n"

@@ -215,7 +215,17 @@ int PrintBasicInfo(FILE* file) {
   return seen_basic_info;
 }
 
-int main(int argc, char* argv[]) {
+
+
+#if defined(BUILD_MONOLITHIC)
+#define main(cnt, arr) jpegXL_info_main(cnt, arr)
+#endif
+
+/*
+ * The main program.
+ */
+
+int main(int argc, const char** argv) {
   if (argc != 2) {
     fprintf(stderr,
             "Usage: %s <jxl>\n"

@@ -201,7 +201,17 @@ bool WriteFile(const char* filename, const uint8_t* data, size_t size) {
   return true;
 }
 
-int main(int argc, char* argv[]) {
+
+
+#if defined(BUILD_MONOLITHIC)
+#define main(cnt, arr) jpegXL_decode_oneshot_main(cnt, arr)
+#endif
+
+/*
+ * The main program.
+ */
+
+int main(int argc, const char** argv) {
   if (argc != 4) {
     fprintf(stderr,
             "Usage: %s <jxl> <pfm> <icc>\n"

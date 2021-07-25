@@ -12,12 +12,12 @@
 namespace ssimulacra {
 namespace {
 
-int PrintUsage(char** argv) {
+int PrintUsage(const char** argv) {
   fprintf(stderr, "Usage: %s [-v] orig.png distorted.png\n", argv[0]);
   return 1;
 }
 
-int Run(int argc, char** argv) {
+int Run(int argc, const char** argv) {
   if (argc < 2) return PrintUsage(argv);
 
   bool verbose = false;
@@ -58,4 +58,16 @@ int Run(int argc, char** argv) {
 }  // namespace
 }  // namespace ssimulacra
 
-int main(int argc, char** argv) { return ssimulacra::Run(argc, argv); }
+
+
+#if defined(BUILD_MONOLITHIC)
+#define main(cnt, arr) jpegXL_ssimulacra_main(cnt, arr)
+#endif
+
+/*
+ * The main program.
+ */
+
+int main(int argc, const char** argv) {
+	return ssimulacra::Run(argc, argv);
+}

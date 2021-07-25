@@ -522,7 +522,17 @@ int Usage(const char* program) {
     return Usage(argv[0]);                                 \
   }
 
-int main(int argc, char* argv[]) {
+
+
+#if defined(BUILD_MONOLITHIC)
+#define main(cnt, arr) jpegXL_conformance_main(cnt, arr)
+#endif
+
+/*
+ * The main program.
+ */
+
+int main(int argc, const char** argv) {
   DecodeOptions opts;
 
   for (int optind = 1; optind < argc;) {
