@@ -113,7 +113,7 @@ bool Debug(const char* format, ...);
   JXL_DEBUG(JXL_DEBUG_WARNING, format, ##__VA_ARGS__)
 
 // Exits the program after printing a stack trace when possible.
-JXL_NORETURN bool Abort();
+JXL_NORETURN void Abort();
 
 // Exits the program after printing file/line plus a formatted string.
 #define JXL_ABORT(format, ...)                                              \

@@ -26,7 +26,7 @@ bool Debug(const char* format, ...) {
   return false;
 }
 
-bool Abort() {
+void Abort() {
 #if defined(ADDRESS_SANITIZER) || defined(MEMORY_SANITIZER) || \
     defined(THREAD_SANITIZER)
   // If compiled with any sanitizer print a stack trace. This call doesn't crash

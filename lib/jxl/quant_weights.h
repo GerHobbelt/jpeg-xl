@@ -86,7 +86,7 @@ struct QuantEncodingInternal {
 
   static constexpr QuantEncodingInternal Library(uint8_t predefined) {
     return ((predefined < kNumPredefinedTables) ||
-            JXL_ABORT("Assert predefined < kNumPredefinedTables")),
+            (JXL_ABORT("Assert predefined < kNumPredefinedTables"), 0)),
            QuantEncodingInternal(Tag<kQuantModeLibrary>(), predefined);
   }
   constexpr QuantEncodingInternal(Tag<kQuantModeLibrary> /* tag */,
