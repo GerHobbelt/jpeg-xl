@@ -314,7 +314,7 @@ class MATreeLookup {
       }
       bool p0 = properties[node.property0] <= node.splitval0;
       uint32_t off0 = properties[node.properties[0]] <= node.splitvals[0];
-      uint32_t off1 = 2 | (properties[node.properties[1]] <= node.splitvals[1]);
+      uint32_t off1 = (2 | (uint32_t)(bool)(properties[node.properties[1]] <= node.splitvals[1]));
       pos = node.childID + (p0 ? off1 : off0);
     }
   }
