@@ -71,6 +71,8 @@
 
 #include <opencv.hpp>
 #include <highgui.hpp>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/imgcodecs.hpp>
 #include <stdio.h>
 #include <set>
 
@@ -127,7 +129,9 @@ const double worst_grid_weight[2][4] =
 
 
 // Convert linear RGB to L*a*b* (all in 0..1 range)
+#if defined(__GNUC__) || defined(__clang__)
 inline void rgb2lab(Vec3f &p) __attribute__ ((hot));
+#endif
 inline void rgb2lab(Vec3f &p) {
     const float epsilon = 0.00885645167903563081f;
     const float s = 0.13793103448275862068f;
