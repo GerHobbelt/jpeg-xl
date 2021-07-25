@@ -9,6 +9,8 @@
 #include "lib/jxl/color_management.h"
 #include "tools/ssimulacra.h"
 
+#include "monolithic_examples.h"
+
 namespace ssimulacra {
 namespace {
 

@@ -29,6 +29,8 @@
 #include "tools/djxl.h"
 #include "tools/speed_stats.h"
 
+#include "monolithic_examples.h"
+
 namespace jpegxl {
 namespace tools {
 namespace {

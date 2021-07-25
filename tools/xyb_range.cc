@@ -16,6 +16,8 @@
 #include "lib/jxl/image.h"
 #include "lib/jxl/image_bundle.h"
 
+#include "monolithic_examples.h"
+
 namespace jxl {
 namespace {
 
@@ -86,5 +88,6 @@ void PrintXybRange() {
  */
 
 int main(int argc, const char** argv) {
-	jxl::PrintXybRange();
+  jxl::PrintXybRange();
+  return 0;
 }

@@ -13,12 +13,14 @@
 #include "lib/jxl/base/thread_pool_internal.h"
 #include "lib/jxl/codec_in_out.h"
 
+#include "monolithic_examples.h"
+
 namespace jxl {
 namespace {
 
 // Reads an input file (typically PNM) with color_space hint and writes to an
 // output file (typically PNG) which supports all required metadata.
-int Convert(int argc, char** argv) {
+int Convert(int argc, const char** argv) {
   if (argc != 4 && argc != 5) {
     fprintf(stderr, "Args: in colorspace_description out [bits]\n");
     return 1;
@@ -46,4 +48,17 @@ int Convert(int argc, char** argv) {
 }  // namespace
 }  // namespace jxl
 
-int main(int argc, char** argv) { return jxl::Convert(argc, argv); }
+
+
+
+#if defined(BUILD_MONOLITHIC)
+#define main(cnt, arr) jpegXL_dec_enc_main(cnt, arr)
+#endif
+
+/*
+ * The main program.
+ */
+
+int main(int argc, const char** argv) {
+  return jxl::Convert(argc, argv);
+}

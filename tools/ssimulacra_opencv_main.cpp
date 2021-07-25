@@ -76,6 +76,8 @@
 #include <stdio.h>
 #include <set>
 
+#include "monolithic_examples.h"
+
 // comment this in to produce debug images that show the differences at each scale
 #define DEBUG_IMAGES 1
 using namespace std;

@@ -13,6 +13,8 @@
 #include "tools/cjxl.h"
 #include "tools/codec_config.h"
 
+#include "monolithic_examples.h"
+
 namespace jpegxl {
 namespace tools {
 

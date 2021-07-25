@@ -20,6 +20,8 @@
 #include "lib/jxl/modular/encoding/encoding.h"
 #include "lib/jxl/splines.h"
 
+#include "monolithic_examples.h"
+
 namespace jxl {
 
 namespace {

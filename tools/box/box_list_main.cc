@@ -17,6 +17,8 @@
 #include "lib/jxl/base/status.h"
 #include "tools/box/box.h"
 
+#include "monolithic_examples.h"
+
 namespace jpegxl {
 namespace tools {
 

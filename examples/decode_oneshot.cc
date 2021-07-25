@@ -19,6 +19,8 @@
 #include "jxl/resizable_parallel_runner.h"
 #include "jxl/resizable_parallel_runner_cxx.h"
 
+#include "monolithic_examples.h"
+
 /** Decodes JPEG XL image to floating point pixels and ICC Profile. Pixel are
  * stored as floating point, as interleaved RGBA (4 floating point values per
  * pixel), line per line from top to bottom.  Pixel values have nominal range

@@ -12,6 +12,8 @@
 #include "tools/cmdline.h"
 #include "tools/epf.h"
 
+#include "monolithic_examples.h"
+
 
 
 #if defined(BUILD_MONOLITHIC)

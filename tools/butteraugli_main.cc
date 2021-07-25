@@ -26,6 +26,8 @@
 #include "lib/jxl/image_bundle.h"
 #include "lib/jxl/image_ops.h"
 
+#include "monolithic_examples.h"
+
 namespace jxl {
 namespace {
 

@@ -11,6 +11,8 @@
 
 #include "jxl/decode.h"
 
+#include "monolithic_examples.h"
+
 int PrintBasicInfo(FILE* file) {
   uint8_t* data = NULL;
   size_t data_size = 0;

@@ -22,6 +22,8 @@
 #include "jxl/thread_parallel_runner.h"
 #include "jxl/thread_parallel_runner_cxx.h"
 
+#include "monolithic_examples.h"
+
 namespace {
 
 struct DecodeOptions {
