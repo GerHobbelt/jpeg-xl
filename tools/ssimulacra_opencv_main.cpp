@@ -69,8 +69,8 @@
     OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 */
 
-#include <cv.hpp>
-#include <highgui.h>
+#include <opencv.hpp>
+#include <highgui.hpp>
 #include <stdio.h>
 #include <set>
 
@@ -121,7 +121,7 @@ const double min_weight[4] = {0.1,0.005,0.005,0.005};
 const double extra_edges_weight[4] = {1.5, 0.1, 0.1, 0.5};
 
 // higher value means more importance to grid-like artifacts (blockiness)
-const double worst_grid_weight[2][4] = 
+const double worst_grid_weight[2][4] =
     { {1.0, 0.1, 0.1, 0.5},             // on ssim heatmap
       {1.0, 0.1, 0.1, 0.5} };           // on extra_edges heatmap
 
@@ -148,7 +148,17 @@ inline void rgb2lab(Vec3f &p) {
 }
 
 
-int main(int argc, char** argv) {
+
+
+#if defined(BUILD_MONOLITHIC)
+#define main(cnt, arr) jpegXL_ssimulacra_openCV_main(cnt, arr)
+#endif
+
+/*
+ * The main program.
+ */
+
+int main(int argc, const char **argv) {
 
     if(argc!=3) {
         fprintf(stderr, "Usage: %s orig_image distorted_image\n", argv[0]);
@@ -332,7 +342,7 @@ int main(int argc, char** argv) {
             for (unsigned int i = 0; i < nChan; i++) row_scores[i].insert(ravg[i]);
           }
           for(unsigned int i = 0; i < nChan; i++) {
-            int k=0; for (const double& s : row_scores[i]) { if (k++ >= errormap.rows/50) { dssim += worst_grid_weight[twice][i] * s; 
+            int k=0; for (const double& s : row_scores[i]) { if (k++ >= errormap.rows/50) { dssim += worst_grid_weight[twice][i] * s;
           printf("grid row %s %i:  %f\n",(twice?"edgediff":"ssimmap"),i,s);
 
  break; } }
@@ -346,7 +356,7 @@ int main(int argc, char** argv) {
             for (unsigned int i = 0; i < nChan; i++) col_scores[i].insert(cavg[i]);
           }
           for(unsigned int i = 0; i < nChan; i++) {
-            int k=0; for (const double& s : col_scores[i]) { if (k++ >= errormap.cols/50) { dssim += worst_grid_weight[twice][i] * s; 
+            int k=0; for (const double& s : col_scores[i]) { if (k++ >= errormap.cols/50) { dssim += worst_grid_weight[twice][i] * s;
           printf("grid col %s %i:  %f\n",(twice?"edgediff":"ssimmap"),i,s);
 
 break; } }
