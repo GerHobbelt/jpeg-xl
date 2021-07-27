@@ -53,9 +53,9 @@ typedef struct JxlMemoryManagerStruct {
   /** Memory allocation function. This can be NULL if and only if also the
    * free() member in this class is NULL. All dynamic memory will be allocated
    * and freed with these functions if they are not NULL. */
-  jpegxl_alloc_func alloc;
+  jpegxl_alloc_func _alloc;
   /** Free function matching the alloc() member. */
-  jpegxl_free_func free;
+  jpegxl_free_func _free;
 
   /* TODO(deymo): Add cache-aligned alloc/free functions here. */
 } JxlMemoryManager;

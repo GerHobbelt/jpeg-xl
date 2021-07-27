@@ -38,23 +38,23 @@ static JXL_INLINE Status MemoryManagerInit(
   } else {
     memset(self, 0, sizeof(*self));
   }
-  if (!self->alloc != !self->free) {
+  if (!self->_alloc != !self->_free) {
     return false;
   }
-  if (!self->alloc) self->alloc = jxl::MemoryManagerDefaultAlloc;
-  if (!self->free) self->free = jxl::MemoryManagerDefaultFree;
+  if (!self->_alloc) self->_alloc = jxl::MemoryManagerDefaultAlloc;
+  if (!self->_free) self->_free = jxl::MemoryManagerDefaultFree;
 
   return true;
 }
 
 static JXL_INLINE void* MemoryManagerAlloc(
     const JxlMemoryManager* memory_manager, size_t size) {
-  return memory_manager->alloc(memory_manager->opaque, size);
+  return memory_manager->_alloc(memory_manager->opaque, size);
 }
 
 static JXL_INLINE void MemoryManagerFree(const JxlMemoryManager* memory_manager,
                                          void* address) {
-  return memory_manager->free(memory_manager->opaque, address);
+  return memory_manager->_free(memory_manager->opaque, address);
 }
 
 // Helper class to be used as a deleter in a unique_ptr<T> call.
@@ -70,7 +70,7 @@ class MemoryManagerDeleteHelper {
       return;
     }
     address->~T();
-    return memory_manager_->free(memory_manager_->opaque, address);
+    return memory_manager_->_free(memory_manager_->opaque, address);
   }
 
  private:
@@ -86,7 +86,7 @@ template <typename T, typename... Args>
 JXL_INLINE MemoryManagerUniquePtr<T> MemoryManagerMakeUnique(
     const JxlMemoryManager* memory_manager, Args&&... args) {
   T* mem =
-      static_cast<T*>(memory_manager->alloc(memory_manager->opaque, sizeof(T)));
+      static_cast<T*>(memory_manager->_alloc(memory_manager->opaque, sizeof(T)));
   if (!mem) {
     // Allocation error case.
     return MemoryManagerUniquePtr<T>(nullptr,
