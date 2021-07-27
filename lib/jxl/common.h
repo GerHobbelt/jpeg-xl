@@ -89,15 +89,15 @@ constexpr size_t kMaxNumReferenceFrames = 4;
 // Computed from FrameHeader.
 // TODO(veluca): add extra channels.
 struct FrameDimensions {
-  void Set(size_t xsize, size_t ysize, size_t group_size_shift,
+  void Set(size_t xsize_, size_t ysize_, size_t group_size_shift,
            size_t max_hshift, size_t max_vshift, bool modular_mode,
            size_t upsampling) {
     group_dim = (kGroupDim >> 1) << group_size_shift;
     dc_group_dim = group_dim * kBlockDim;
-    xsize_upsampled = xsize;
-    ysize_upsampled = ysize;
-    this->xsize = DivCeil(xsize, upsampling);
-    this->ysize = DivCeil(ysize, upsampling);
+    xsize_upsampled = xsize_;
+    ysize_upsampled = ysize_;
+    this->xsize = DivCeil(xsize_, upsampling);
+    this->ysize = DivCeil(ysize_, upsampling);
     xsize_blocks = DivCeil(this->xsize, kBlockDim << max_hshift) << max_hshift;
     ysize_blocks = DivCeil(this->ysize, kBlockDim << max_vshift) << max_vshift;
     xsize_padded = xsize_blocks * kBlockDim;
