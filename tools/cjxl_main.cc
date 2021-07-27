@@ -18,6 +18,17 @@
 namespace jpegxl {
 namespace tools {
 
+enum CjxlRetCode : int {
+  OK = 0,
+  ERR_PARSE,
+  ERR_INVALID_ARG,
+  ERR_LOAD_INPUT,
+  ERR_INVALID_INPUT,
+  ERR_ENCODING,
+  ERR_CONTAINER,
+  ERR_WRITE,
+};
+
 int CompressJpegXlMain(int argc, const char* argv[]) {
   CommandLineParser cmdline;
   CompressArgs args;
@@ -26,14 +37,14 @@ int CompressJpegXlMain(int argc, const char* argv[]) {
   if (!cmdline.Parse(argc, argv)) {
     // Parse already printed the actual error cause.
     fprintf(stderr, "Use '%s -h' for more information\n", argv[0]);
-    return 1;
+    return CjxlRetCode::ERR_PARSE;
   }
 
   if (args.version) {
     fprintf(stdout, "cjxl %s\n",
             CodecConfigString(JxlEncoderVersion()).c_str());
     fprintf(stdout, "Copyright (c) the JPEG XL Project\n");
-    return 0;
+    return CjxlRetCode::OK;
   }
 
   if (!args.quiet) {
@@ -43,13 +54,13 @@ int CompressJpegXlMain(int argc, const char* argv[]) {
 
   if (cmdline.HelpFlagPassed()) {
     cmdline.PrintHelp();
-    return 0;
+    return CjxlRetCode::OK;
   }
 
   if (!args.ValidateArgs(cmdline)) {
     // ValidateArgs already printed the actual error cause.
     fprintf(stderr, "Use '%s -h' for more information\n", argv[0]);
-    return 1;
+    return CjxlRetCode::ERR_INVALID_ARG;
   }
 
   jxl::PaddedBytes compressed;
@@ -57,12 +68,14 @@ int CompressJpegXlMain(int argc, const char* argv[]) {
   jxl::ThreadPoolInternal pool(args.num_threads);
   jxl::CodecInOut io;
   double decode_mps = 0;
-  JXL_RETURN_IF_ERROR(LoadAll(args, &pool, &io, &decode_mps));
+  if (!LoadAll(args, &pool, &io, &decode_mps)) {
+    return CjxlRetCode::ERR_LOAD_INPUT;
+  }
 
   // need to validate again because now we know the input
   if (!args.ValidateArgsAfterLoad(cmdline, io)) {
     fprintf(stderr, "Use '%s -h' for more information\n", argv[0]);
-    return 1;
+    return CjxlRetCode::ERR_INVALID_INPUT;
   }
   if (!args.file_out && !args.quiet) {
     fprintf(stderr,
@@ -70,7 +83,7 @@ int CompressJpegXlMain(int argc, const char* argv[]) {
             "Encoding will be performed, but the result will be discarded.\n");
   }
   if (!CompressJxl(io, decode_mps, &pool, args, &compressed, !args.quiet)) {
-    return 1;
+    return CjxlRetCode::ERR_ENCODING;
   }
 
   if (args.use_container) {
@@ -100,7 +113,7 @@ int CompressJpegXlMain(int argc, const char* argv[]) {
     jxl::PaddedBytes container_file;
     if (!EncodeJpegXlContainerOneShot(container, &container_file)) {
       fprintf(stderr, "Failed to encode container format\n");
-      return 1;
+      return CjxlRetCode::ERR_CONTAINER;
     }
     compressed.swap(container_file);
     if (!args.quiet) {
@@ -115,7 +128,7 @@ int CompressJpegXlMain(int argc, const char* argv[]) {
   if (args.file_out) {
     if (!jxl::WriteFile(compressed, args.file_out)) {
       fprintf(stderr, "Failed to write to \"%s\"\n", args.file_out);
-      return 1;
+      return CjxlRetCode::ERR_WRITE;
     }
   }
 

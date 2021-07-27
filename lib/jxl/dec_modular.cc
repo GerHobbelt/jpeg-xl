@@ -322,13 +322,9 @@ Status ModularFrameDecoder::DecodeGroup(const Rect& rect, BitReader* reader,
     Rect r(rect.x0() >> fc.hshift, rect.y0() >> fc.vshift,
            rect.xsize() >> fc.hshift, rect.ysize() >> fc.vshift, fc.w, fc.h);
     if (r.xsize() == 0 || r.ysize() == 0) continue;
-    for (size_t y = 0; y < r.ysize(); ++y) {
-      pixel_type* const JXL_RESTRICT row_out = r.Row(&fc.plane, y);
-      const pixel_type* const JXL_RESTRICT row_in = gi.channel[gic].Row(y);
-      for (size_t x = 0; x < r.xsize(); ++x) {
-        row_out[x] = row_in[x];
-      }
-    }
+    CopyImageTo(/*rect_from=*/Rect(0, 0, r.xsize(), r.ysize()),
+                /*from=*/gi.channel[gic].plane,
+                /*rect_to=*/r, /*to=*/&fc.plane);
     gic++;
   }
   return true;
@@ -563,9 +559,15 @@ Status ModularFrameDecoder::ModularImageToDecodedRect(
     const size_t ec_xsize = DivCeil(frame_dim.xsize_upsampled, ecups);
     const size_t ec_ysize = DivCeil(frame_dim.ysize_upsampled, ecups);
     Channel& ch_in = gi.channel[c];
+    // For x0, y0 there's no need to do a DivCeil().
+    JXL_DASSERT(rect.x0() % (1ul << ch_in.hshift) == 0);
+    JXL_DASSERT(rect.y0() % (1ul << ch_in.vshift) == 0);
     Rect r(rect.x0() >> ch_in.hshift, rect.y0() >> ch_in.vshift,
-           rect.xsize() >> ch_in.hshift, rect.ysize() >> ch_in.vshift, ec_xsize,
-           ec_ysize);
+           DivCeil(rect.xsize(), 1lu << ch_in.hshift),
+           DivCeil(rect.ysize(), 1lu << ch_in.vshift), ec_xsize, ec_ysize);
+
+    JXL_DASSERT(r.IsInside(dec_state->extra_channels[ec]));
+    JXL_DASSERT(Rect(0, 0, r.xsize(), r.ysize()).IsInside(ch_in.plane));
     for (size_t y = 0; y < r.ysize(); ++y) {
       float* const JXL_RESTRICT row_out =
           r.Row(&dec_state->extra_channels[ec], y);
@@ -578,6 +580,7 @@ Status ModularFrameDecoder::ModularImageToDecodedRect(
         }
       }
     }
+    JXL_CHECK_IMAGE_INITIALIZED(dec_state->extra_channels[ec], r);
   }
   return true;
 }
