@@ -76,4 +76,5 @@ int main(int argc, const char** argv) {
     fprintf(stderr, "Failed to write the result to \"%s\".\n", output_filename);
     return EXIT_FAILURE;
   }
+  return EXIT_SUCCESS;
 }
