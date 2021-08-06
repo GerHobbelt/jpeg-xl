@@ -271,7 +271,15 @@ static Status InvPalette(Image &input, uint32_t begin_c, uint32_t nb_colors,
           "UndoDeltaPaletteNoWP");
     }
   }
-  input.nb_meta_channels--;
+  if (c0 >= input.nb_meta_channels) {
+    // Palette was done on normal channels
+    input.nb_meta_channels--;
+  } else {
+    // Palette was done on metachannels
+    JXL_ASSERT(static_cast<int>(input.nb_meta_channels) >= 2 - nb);
+    input.nb_meta_channels -= 2 - nb;
+    JXL_ASSERT(begin_c + nb - 1 < input.nb_meta_channels);
+  }
   input.channel.erase(input.channel.begin(), input.channel.begin() + 1);
   return num_errors.load(std::memory_order_relaxed) == 0;
 }
@@ -282,12 +290,13 @@ static Status MetaPalette(Image &input, uint32_t begin_c, uint32_t end_c,
 
   size_t nb = end_c - begin_c + 1;
   if (begin_c >= input.nb_meta_channels) {
+    // Palette was done on normal channels
     input.nb_meta_channels++;
-  } else if (end_c < input.nb_meta_channels) {
+  } else {
+    // Palette was done on metachannels
+    JXL_ASSERT(end_c < input.nb_meta_channels);
     // we remove nb-1 metachannels and add one
     input.nb_meta_channels += 2 - nb;
-  } else {
-    return JXL_FAILURE("Error: Palette operating on mixed meta/nonmeta");
   }
   input.channel.erase(input.channel.begin() + begin_c + 1,
                       input.channel.begin() + end_c + 1);

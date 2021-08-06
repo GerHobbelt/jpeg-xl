@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
  - API: New functions to decode extra channels:
    `JxlDecoderExtraChannelBufferSize` and `JxlDecoderSetExtraChannelBuffer`.
 
-## [Unreleased - to be released in 0.5.0]
+## [0.5] - 2021-08-02
 ### Added
  - API: New function to decode the image using a callback outputting a part of a
    row per call.
@@ -19,9 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    efficiently to earlier animation frames.
  - API: `JxlDecoderSetPreferredColorProfile` function to choose color profile in
    certain circumstances.
- - encoder: Adding `center_x` and `center_y` flags for more control of the tile order. 
+ - encoder: Adding `center_x` and `center_y` flags for more control of the tile
+   order.
+ - New encoder speeds `lightning` (1) and `thunder` (2).
 
 ### Changed
+ - Re-licensed the project under a BSD 3-Clause license. See the
+   [LICENSE](LICENSE) and [PATENTS](PATENTS) files for details.
  - Full JPEG XL part 1 specification support: Implemented all the spec required
    to decode files to pixels, including cases that are not used by the encoder
    yet. Part 2 of the spec (container format) is final but not fully implemented
@@ -32,6 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
  - Reduce the size of the jxl_dec library by removing dependencies.
  - A few encoding speedups.
  - Clarify the security policy.
+ - Significant encoding improvements (~5 %) and less ringing.
+ - Butteraugli metric to have some less masking.
+ - `cjxl` flag `--speed` is deprecated and replaced by the `--effort` synonym.
 
 ### Removed
 - API for returning a downsampled DC was deprecated
