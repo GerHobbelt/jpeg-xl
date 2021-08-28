@@ -235,7 +235,8 @@ void MyOutputMessage(j_common_ptr cinfo) {
 }  // namespace
 #endif  // JPEGXL_ENABLE_JPEG
 
-Status DecodeImageJPG(const Span<const uint8_t> bytes, ThreadPool* pool,
+Status DecodeImageJPG(const Span<const uint8_t> bytes,
+                      const ColorHints& color_hints, ThreadPool* pool,
                       CodecInOut* io, double* const elapsed_deinterleave) {
   if (elapsed_deinterleave != nullptr) *elapsed_deinterleave = 0;
   // Don't do anything for non-JPEG files (no need to report an error)
@@ -244,7 +245,9 @@ Status DecodeImageJPG(const Span<const uint8_t> bytes, ThreadPool* pool,
 
   // Use brunsli JPEG decoder to read quantized coefficients.
   if (target == DecodeTarget::kQuantizedCoeffs) {
-    return jxl::jpeg::DecodeImageJPG(bytes, io);
+    Status could_decode = jxl::jpeg::DecodeImageJPG(bytes, io);
+    if (!could_decode) fprintf(stderr, "Corrupt or CMYK JPEG.\n");
+    return could_decode;
   }
 
 #if JPEGXL_ENABLE_JPEG
@@ -308,11 +311,9 @@ Status DecodeImageJPG(const Span<const uint8_t> bytes, ThreadPool* pool,
     if (nbcomp != 1 && nbcomp != 3) {
       return failure("unsupported number of components in JPEG");
     }
-    (void)io->dec_hints.Foreach(
-        [](const std::string& key, const std::string& /*value*/) {
-          JXL_WARNING("JPEG decoder ignoring %s hint", key.c_str());
-          return true;
-        });
+    if (!ApplyColorHints(color_hints, /*color_already_set=*/true, false, io)) {
+      return failure("ApplyColorHints failed");
+    }
 
     jpeg_start_decompress(&cinfo);
     JXL_ASSERT(cinfo.output_components == nbcomp);

@@ -26,7 +26,7 @@ namespace jxl {
 
 namespace {
 struct SplineData {
-  int32_t quantization_adjustment;
+  int32_t quantization_adjustment = 1;
   std::vector<Spline> splines;
 };
 
@@ -421,8 +421,7 @@ int JxlFromTree(const char* in, const char* out, const char* tree_out) {
   *metadata = io.metadata;
   JXL_RETURN_IF_ERROR(metadata->size.Set(io.xsize(), io.ysize()));
 
-  metadata->m.xyb_encoded =
-      cparams.color_transform == ColorTransform::kXYB ? true : false;
+  metadata->m.xyb_encoded = cparams.color_transform == ColorTransform::kXYB;
 
   JXL_RETURN_IF_ERROR(WriteHeaders(metadata.get(), &writer, nullptr));
   writer.ZeroPadToByte();
