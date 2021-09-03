@@ -21,6 +21,10 @@
 #include "lib/jxl/memory_manager_internal.h"
 #include "lib/jxl/toc.h"
 
+#ifdef JPEGXL_VERSION_FROM_GIT
+#include "tool_version_git.h"
+#endif
+
 namespace {
 
 // If set (by fuzzer) then some operations will fail, if those would require

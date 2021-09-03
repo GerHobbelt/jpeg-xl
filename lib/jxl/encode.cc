@@ -17,6 +17,10 @@
 #include "lib/jxl/encode_internal.h"
 #include "lib/jxl/jpeg/enc_jpeg_data.h"
 
+#ifdef JPEGXL_VERSION_FROM_GIT
+#include "tool_version_git.h"
+#endif
+
 // Debug-printing failure macro similar to JXL_FAILURE, but for the status code
 // JXL_ENC_ERROR
 #ifdef JXL_CRASH_ON_ERROR
