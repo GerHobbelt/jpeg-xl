@@ -9,7 +9,13 @@
 
 #include "jxl/decode.h"
 
-int main() {
+
+
+#if defined(BUILD_MONOLITHIC)
+#define main(cnt, arr) jpegXL_C_test_main(cnt, arr)
+#endif
+
+int main(int argc, const char** argv) {
   if (!JxlDecoderVersion()) return 1;
   JxlDecoder* dec = JxlDecoderCreate(NULL);
   if (!dec) return 1;
