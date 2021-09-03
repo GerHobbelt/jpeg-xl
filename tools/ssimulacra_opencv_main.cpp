@@ -69,11 +69,15 @@
     OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 */
 
+#include <stdio.h>
+#include <stdlib.h>
+
+#ifndef NO_OPENCV
+
 #include <opencv.hpp>
 #include <highgui.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/imgcodecs.hpp>
-#include <stdio.h>
 #include <set>
 
 #include "monolithic_examples.h"
@@ -384,9 +388,7 @@ break; } }
         dssim += min_weight[i]  * minVal * mscale_weights[i][scale];
         dssim_max += min_weight[i]  * mscale_weights[i][scale];
       }
-
     }
-
 
     dssim = dssim_max / dssim - 1;
     if (dssim < 0) dssim = 0; // should not happen
@@ -396,3 +398,17 @@ break; } }
 
     return(0);
 }
+
+#else
+
+#if defined(BUILD_MONOLITHIC)
+#define main(cnt, arr) jpegXL_ssimulacra_openCV_main(cnt, arr)
+#endif
+
+int main(int argc, const char **argv) {
+  fprintf(stderr,
+          "SSimulacra_OpenCV is not supported in this non-openCV build (OpenCV "
+          "is NOT included in this build).\n");
+  return EXIT_FAILURE;
+
+#endif
