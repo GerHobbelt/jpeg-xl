@@ -3,7 +3,7 @@
 	url = https://github.com/GerHobbelt/brotli
 [submodule "third_party/lodepng"]
 	path = third_party/lodepng
-	url = https://github.com/lvandeve/lodepng
+	url = https://github.com/GerHobbelt/lodepng
 [submodule "third_party/lcms"]
 	path = third_party/lcms
 	url = https://github.com/GerHobbelt/Little-CMS
