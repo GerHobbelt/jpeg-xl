@@ -22,7 +22,7 @@
 namespace jpegxl {
 namespace tools {
 
-int RunMain(int argc, const char* argv[]) {
+int RunMain(int argc, const char** argv) {
   if (argc < 2) {
     fprintf(stderr, "Usage: %s <filename>", argv[0]);
     return 1;

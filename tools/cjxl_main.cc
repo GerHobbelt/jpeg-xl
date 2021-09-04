@@ -29,7 +29,7 @@ enum CjxlRetCode : int {
   ERR_WRITE,
 };
 
-int CompressJpegXlMain(int argc, const char* argv[]) {
+int CompressJpegXlMain(int argc, const char** argv) {
   CommandLineParser cmdline;
   CompressArgs args;
   args.AddCommandLineOptions(&cmdline);

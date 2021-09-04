@@ -44,7 +44,7 @@ void CommandLineParser::PrintHelp() const {
           (showed_all ? "" : " (use -v to see more options)"));
 }
 
-bool CommandLineParser::Parse(int argc, const char* argv[]) {
+bool CommandLineParser::Parse(int argc, const char** argv) {
   if (argc) program_name_ = argv[0];
   int i = 1;  // argv[0] is the program name.
   // if false, stop matching options and take only positional arguments
