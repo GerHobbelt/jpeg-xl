@@ -72,6 +72,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "monolithic_examples.h"
+
 #ifndef NO_OPENCV
 
 #include <opencv.hpp>
@@ -79,8 +81,6 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <set>
-
-#include "monolithic_examples.h"
 
 // comment this in to produce debug images that show the differences at each scale
 #define DEBUG_IMAGES 1
@@ -168,7 +168,7 @@ inline void rgb2lab(Vec3f &p) {
  * The main program.
  */
 
-int main(int argc, const char **argv) {
+int main(int argc, const char *argv[]) {
 
     if(argc!=3) {
         fprintf(stderr, "Usage: %s orig_image distorted_image\n", argv[0]);
@@ -405,10 +405,11 @@ break; } }
 #define main(cnt, arr) jpegXL_ssimulacra_openCV_main(cnt, arr)
 #endif
 
-int main(int argc, const char **argv) {
+int main(int argc, const char** argv) {
   fprintf(stderr,
-          "SSimulacra_OpenCV is not supported in this non-openCV build (OpenCV "
+          "ssimulacra_OpenCV is not supported in this non-openCV build (OpenCV "
           "is NOT included in this build).\n");
   return EXIT_FAILURE;
+}
 
 #endif
