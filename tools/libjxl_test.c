@@ -22,4 +22,5 @@ int main(int argc, const char** argv) {
   JxlDecoder* dec = JxlDecoderCreate(NULL);
   if (!dec) return 1;
   JxlDecoderDestroy(dec);
+  return 0;
 }
