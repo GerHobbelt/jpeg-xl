@@ -257,9 +257,9 @@ class FrameDecoder {
   bool allow_partial_dc_global_;
   bool render_spotcolors_ = true;
 
-  std::vector<uint8_t> processed_section_;
+  std::vector<bool> processed_section_;
   std::vector<uint8_t> decoded_passes_per_ac_group_;
-  std::vector<uint8_t> decoded_dc_groups_;
+  std::vector<bool> decoded_dc_groups_;
   bool decoded_dc_global_;
   bool decoded_ac_global_;
   bool finalized_dc_ = true;
