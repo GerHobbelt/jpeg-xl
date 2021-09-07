@@ -6,7 +6,7 @@
 	url = https://github.com/GerHobbelt/lodepng
 [submodule "third_party/lcms"]
 	path = third_party/lcms
-	url = https://github.com/GerHobbelt/Little-CMS
+	url = https://github.com/GerHobbelt/thirdparty-lcms2
 [submodule "third_party/googletest"]
 	path = third_party/googletest
 	url = https://github.com/GerHobbelt/googletest
