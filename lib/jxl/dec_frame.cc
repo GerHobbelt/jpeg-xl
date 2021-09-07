@@ -851,7 +851,7 @@ int FrameDecoder::References() const {
   }
   if ((!decoded_dc_global_ || !decoded_ac_global_ ||
        *std::min_element(decoded_dc_groups_.begin(),
-                         decoded_dc_groups_.end()) != 1 ||
+                         decoded_dc_groups_.end()) != true ||
        *std::min_element(decoded_passes_per_ac_group_.begin(),
                          decoded_passes_per_ac_group_.end()) < max_passes_)) {
     return 0;
@@ -906,7 +906,7 @@ Status FrameDecoder::FinalizeFrame() {
   }
   if ((!decoded_dc_global_ || !decoded_ac_global_ ||
        *std::min_element(decoded_dc_groups_.begin(),
-                         decoded_dc_groups_.end()) != 1 ||
+                         decoded_dc_groups_.end()) != true ||
        *std::min_element(decoded_passes_per_ac_group_.begin(),
                          decoded_passes_per_ac_group_.end()) < max_passes_) &&
       !allow_partial_frames_) {
