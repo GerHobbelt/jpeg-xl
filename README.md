@@ -3,12 +3,13 @@
 <img src="doc/jxl.svg" width="100" align="right" alt="JXL logo">
 
 This repository contains a reference implementation of JPEG XL (encoder and
-decoder), called `libjxl`.
+decoder), called `libjxl`. This software library is
+[used by many applications that support JPEG XL](doc/software_support.md).
 
-JPEG XL is in the final stages of standardization and its codestream format is
-frozen.
+JPEG XL is in the final stages of standardization and its codestream and file format
+are frozen.
 
-The libraries API, command line options and tools in this repository are subject
+The library API, command line options, and tools in this repository are subject
 to change, however files encoded with `cjxl` conform to the JPEG XL format
 specification and can be decoded with current and future `djxl` decoders or
 `libjxl` decoding library.
@@ -24,9 +25,12 @@ git clone https://github.com/libjxl/libjxl.git --recursive
 ```
 
 This repository uses git submodules to handle some third party dependencies
-under `third_party/`, that's why is important to pass `--recursive`. If you
+under `third_party`, that's why is important to pass `--recursive`. If you
 didn't check out with `--recursive`, or any submodule has changed, run:
-`git submodule update --init --recursive`.
+
+```bash
+git submodule update --init --recursive
+```
 
 Important: If you downloaded a zip file or tarball from the web interface you
 won't get the needed submodules and the code will not compile. You can download
@@ -50,11 +54,11 @@ sudo apt install libgif-dev libjpeg-dev libopenexr-dev libpng-dev libwebp-dev
 ```
 
 We recommend using a recent Clang compiler (version 7 or newer), for that
-install clang and set `CC` and `CXX` variables. For example, with clang-7:
+install clang and set `CC` and `CXX` variables.
 
 ```bash
-sudo apt install clang-7
-export CC=clang-7 CXX=clang++-7
+sudo apt install clang
+export CC=clang CXX=clang++
 ```
 
 ### Building

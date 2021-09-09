@@ -25,6 +25,7 @@
 #include "lib/jxl/testdata.h"
 
 namespace jxl {
+namespace extras {
 namespace {
 
 CodecInOut CreateTestImage(const size_t xsize, const size_t ysize,
@@ -371,7 +372,7 @@ TEST(CodecTest, TestWideGamut) {
 }
 
 TEST(CodecTest, TestPNM) { TestCodecPNM(); }
-TEST(CodecTest, TestPGX) { TestCodecPGX(); }
 
 }  // namespace
+}  // namespace extras
 }  // namespace jxl
