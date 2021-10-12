@@ -27,9 +27,9 @@ int PrintBasicInfo(FILE* file) {
 
   JxlDecoderSetKeepOrientation(dec, 1);
 
-  if (JXL_DEC_SUCCESS !=
-      JxlDecoderSubscribeEvents(
-          dec, JXL_DEC_BASIC_INFO | JXL_DEC_COLOR_ENCODING | JXL_DEC_FRAME)) {
+  if (JXL_DEC_SUCCESS != JxlDecoderSubscribeEvents(
+                             dec, JXL_DEC_BASIC_INFO | JXL_DEC_COLOR_ENCODING |
+                                      JXL_DEC_FRAME | JXL_DEC_BOX)) {
     fprintf(stderr, "JxlDecoderSubscribeEvents failed\n");
     JxlDecoderDestroy(dec);
     return 0;
@@ -116,6 +116,7 @@ int PrintBasicInfo(FILE* file) {
       } else {
         fprintf(stderr, "Invalid orientation\n");
       }
+      printf("num_color_channels: %d\n", info.num_color_channels);
       printf("num_extra_channels: %d\n", info.num_extra_channels);
 
       const char* const ec_type_names[7] = {"Alpha",       "Depth",
@@ -252,7 +253,6 @@ int PrintBasicInfo(FILE* file) {
         printf("  rendering intent: %d\n", (int)profile[67]);
         free(profile);
       }
-
     } else if (status == JXL_DEC_FRAME) {
       if (JXL_DEC_SUCCESS != JxlDecoderGetFrameHeader(dec, &frame_header)) {
         fprintf(stderr, "JxlDecoderGetFrameHeader failed\n");
@@ -273,13 +273,21 @@ int PrintBasicInfo(FILE* file) {
       float ms = frame_header.duration * 1000.f *
                  info.animation.tps_denominator / info.animation.tps_numerator;
       if (info.have_animation) {
-        printf("  Duration: %u ticks (%f ms)\n", frame_header.duration, ms);
+        printf("  duration: %u ticks (%f ms)\n", frame_header.duration, ms);
         if (info.animation.have_timecodes) {
-          printf("  Time code: %X\n", frame_header.timecode);
+          printf("  time code: %X\n", frame_header.timecode);
         }
       }
-
-      // This is the last expected event, no need to read the rest of the file.
+      if (!frame_header.name_length && !info.have_animation) {
+        printf("  still frame, unnamed\n");
+      }
+    } else if (status == JXL_DEC_BOX) {
+      JxlBoxType type;
+      uint64_t size;
+      JxlDecoderGetBoxType(dec, type, JXL_FALSE);
+      JxlDecoderGetBoxSizeRaw(dec, &size);
+      printf("box: type: \"%c%c%c%c\" size: %zu\n", type[0], type[1], type[2],
+             type[3], (size_t)size);
     } else {
       fprintf(stderr, "Unexpected decoder status\n");
       break;

@@ -1,5 +1,3 @@
-# Copyright (c) the JPEG XL Project Authors. All rights reserved.
-#
 # Use of this source code is governed by a BSD-style
 # license that can be found in the LICENSE file.
 
@@ -25,7 +23,6 @@ set(TEST_FILES
   jxl/data_parallel_test.cc
   jxl/dct_test.cc
   jxl/decode_test.cc
-  jxl/descriptive_statistics_test.cc
   jxl/enc_external_image_test.cc
   jxl/enc_photon_noise_test.cc
   jxl/encode_test.cc
@@ -55,7 +52,6 @@ set(TEST_FILES
   jxl/quant_weights_test.cc
   jxl/quantizer_test.cc
   jxl/rational_polynomial_test.cc
-  jxl/robust_statistics_test.cc
   jxl/roundtrip_test.cc
   jxl/speed_tier_test.cc
   jxl/splines_test.cc
@@ -69,6 +65,8 @@ set(TEST_FILES
 
 # Test-only library code.
 set(TESTLIB_FILES
+  jxl/codec_y4m_testonly.cc
+  jxl/codec_y4m_testonly.h
   jxl/dct_for_test.h
   jxl/dec_transforms_testonly.cc
   jxl/dec_transforms_testonly.h
@@ -90,7 +88,7 @@ target_compile_definitions(jxl_testlib-static PUBLIC
 target_include_directories(jxl_testlib-static PUBLIC
   "${PROJECT_SOURCE_DIR}"
 )
-target_link_libraries(jxl_testlib-static hwy)
+target_link_libraries(jxl_testlib-static hwy jxl-static)
 
 # Individual test binaries:
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/tests)

@@ -4,7 +4,9 @@
  * license that can be found in the LICENSE file.
  */
 
-/** @file types.h
+/** @addtogroup libjxl_common
+ * @{
+ * @file types.h
  * @brief Data types for the JPEG XL API, for both encoding and decoding.
  */
 
@@ -109,8 +111,14 @@ typedef struct {
   size_t align;
 } JxlPixelFormat;
 
+/** Data type holding the 4-character type name of an ISOBMFF box.
+ */
+typedef char JxlBoxType[4];
+
 #if defined(__cplusplus) || defined(c_plusplus)
 }
 #endif
 
 #endif /* JXL_TYPES_H_ */
+
+/** @}*/

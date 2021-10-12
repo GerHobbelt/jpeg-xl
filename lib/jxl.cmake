@@ -29,8 +29,6 @@ set(JPEGXL_INTERNAL_SOURCES_DEC
   jxl/base/compiler_specific.h
   jxl/base/data_parallel.cc
   jxl/base/data_parallel.h
-  jxl/base/descriptive_statistics.cc
-  jxl/base/descriptive_statistics.h
   jxl/base/file_io.h
   jxl/base/iaca.h
   jxl/base/os_macros.h
@@ -38,7 +36,8 @@ set(JPEGXL_INTERNAL_SOURCES_DEC
   jxl/base/padded_bytes.cc
   jxl/base/padded_bytes.h
   jxl/base/profiler.h
-  jxl/base/robust_statistics.h
+  jxl/base/random.cc
+  jxl/base/random.h
   jxl/base/span.h
   jxl/base/status.cc
   jxl/base/status.h
@@ -100,6 +99,8 @@ set(JPEGXL_INTERNAL_SOURCES_DEC
   jxl/dec_xyb.cc
   jxl/dec_xyb.h
   jxl/decode.cc
+  jxl/decode_brob_box.cc
+  jxl/decode_brob_box.h
   jxl/decode_to_jpeg.cc
   jxl/decode_to_jpeg.h
   jxl/enc_bit_writer.cc
@@ -161,13 +162,13 @@ set(JPEGXL_INTERNAL_SOURCES_DEC
   jxl/modular/modular_image.h
   jxl/modular/options.h
   jxl/modular/transform/palette.h
+  jxl/modular/transform/rct.cc
   jxl/modular/transform/rct.h
   jxl/modular/transform/squeeze.cc
   jxl/modular/transform/squeeze.h
   jxl/modular/transform/transform.cc
   jxl/modular/transform/transform.h
   jxl/noise.h
-  jxl/noise_distributions.h
   jxl/opsin_params.cc
   jxl/opsin_params.h
   jxl/passes_state.cc
@@ -282,6 +283,8 @@ set(JPEGXL_INTERNAL_SOURCES_ENC
   jxl/jpeg/enc_jpeg_huffman_decode.cc
   jxl/jpeg/enc_jpeg_huffman_decode.h
   jxl/linalg.cc
+  jxl/modular/encoding/enc_debug_tree.cc
+  jxl/modular/encoding/enc_debug_tree.h
   jxl/modular/encoding/enc_encoding.cc
   jxl/modular/encoding/enc_encoding.h
   jxl/modular/encoding/enc_ma.cc
@@ -523,6 +526,13 @@ set_target_properties(jxl_dec PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
+# Check whether the linker support excluding libs
+set(LINKER_EXCLUDE_LIBS_FLAG "-Wl,--exclude-libs=ALL")
+include(CheckCSourceCompiles)
+list(APPEND CMAKE_EXE_LINKER_FLAGS ${LINKER_EXCLUDE_LIBS_FLAG})
+check_c_source_compiles("int main(){return 0;}" LINKER_SUPPORT_EXCLUDE_LIBS)
+list(REMOVE_ITEM CMAKE_EXE_LINKER_FLAGS ${LINKER_EXCLUDE_LIBS_FLAG})
+
 # Add a jxl.version file as a version script to tag symbols with the
 # appropriate version number. This script is also used to limit what's exposed
 # in the shared library from the static dependencies bundled here.
@@ -541,8 +551,10 @@ foreach(target IN ITEMS jxl jxl_dec)
   # This hides the default visibility symbols from static libraries bundled into
   # the shared library. In particular this prevents exposing symbols from hwy
   # and skcms in the shared library.
-  set_property(TARGET ${target} APPEND_STRING PROPERTY
-      LINK_FLAGS " -Wl,--exclude-libs=ALL")
+  if(${LINKER_SUPPORT_EXCLUDE_LIBS})
+    set_property(TARGET ${target} APPEND_STRING PROPERTY
+        LINK_FLAGS " ${LINKER_EXCLUDE_LIBS_FLAG}")
+  endif()
 endforeach()
 
 # Only install libjxl shared library. The libjxl_dec is not installed since it

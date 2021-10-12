@@ -132,9 +132,7 @@ class FrameDecoder {
 
   // Returns whether a DC image has been decoded, accessible at low resolution
   // at passes.shared_storage.dc_storage
-  bool HasDecodedDC() const {
-    return frame_header_.encoding == FrameEncoding::kVarDCT && finalized_dc_;
-  }
+  bool HasDecodedDC() const { return finalized_dc_; }
 
   // Sets the buffer to which uint8 sRGB pixels will be decoded. This is not
   // supported for all images. If it succeeds, HasRGBBuffer() will return true.
@@ -265,6 +263,7 @@ class FrameDecoder {
   bool finalized_dc_ = true;
   bool is_finalized_ = true;
   size_t num_renders_ = 0;
+  bool allocated_ = false;
 
   std::vector<GroupDecCache> group_dec_caches_;
 

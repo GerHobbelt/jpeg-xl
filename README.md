@@ -1,5 +1,14 @@
 # JPEG XL reference implementation
 
+[![Build&Test](https://github.com/libjxl/libjxl/actions/workflows/build_test.yml/badge.svg)](
+https://github.com/libjxl/libjxl/actions/workflows/build_test.yml)
+[![Releases](https://github.com/libjxl/libjxl/actions/workflows/release.yaml/badge.svg)](
+https://github.com/libjxl/libjxl/actions/workflows/release.yaml)
+[![Doc](https://readthedocs.org/projects/libjxl/badge/?version=latest)](
+https://libjxl.readthedocs.io/en/latest/?badge=latest)
+[![codecov](https://codecov.io/gh/libjxl/libjxl/branch/main/graph/badge.svg)](
+https://codecov.io/gh/libjxl/libjxl)
+
 <img src="doc/jxl.svg" width="100" align="right" alt="JXL logo">
 
 This repository contains a reference implementation of JPEG XL (encoder and
@@ -145,6 +154,7 @@ format: Cloudinary and Google.
 
 ### Codec description
 
+*   [JPEG XL Format Overview](doc/format_overview.md)
 *   [Introductory paper](https://www.spiedigitallibrary.org/proceedings/Download?fullDOI=10.1117%2F12.2529237) (open-access)
 *   [XL Overview](doc/xl_overview.md) - a brief introduction to the source code modules
 *   [JPEG XL white paper](http://ds.jpeg.org/whitepapers/jpeg-xl-whitepaper.pdf)
@@ -157,6 +167,9 @@ format: Cloudinary and Google.
 *   [Git guide for JPEG XL](doc/developing_in_github.md) - for developers
 *   [Fuzzing](doc/fuzzing.md) - for developers
 *   [Building Web Assembly artifacts](doc/building_wasm.md)
+*   [Test coverage on Codecov.io](https://app.codecov.io/gh/libjxl/libjxl) - for
+    developers
+*   [libjxl documentation on readthedocs.io](https://libjxl.readthedocs.io/)
 
 ### Contact
 
