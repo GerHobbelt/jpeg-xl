@@ -21,6 +21,7 @@
 #include "lib/jxl/enc_photon_noise.h"
 #include "lib/jxl/enc_xyb.h"
 
+#include "monolithic_examples.h"
 
 
 
@@ -77,4 +78,5 @@ int main(int argc, const char** argv) {
   io.SetFromImage(std::move(xyb), jxl::ColorEncoding::LinearSRGB());
 
   JXL_CHECK(jxl::EncodeToFile(io, argv[3], &pool));
+  return EXIT_SUCCESS;
 }

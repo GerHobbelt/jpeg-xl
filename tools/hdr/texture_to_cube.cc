@@ -11,6 +11,7 @@
 #include "tools/args.h"
 #include "tools/cmdline.h"
 
+#include "monolithic_examples.h"
 
 
 
@@ -74,4 +75,5 @@ int main(int argc, const char** argv) {
       }
     }
   }
+  return EXIT_SUCCESS;
 }

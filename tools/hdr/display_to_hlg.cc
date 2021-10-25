@@ -85,4 +85,5 @@ int main(int argc, const char** argv) {
   JXL_CHECK(image.TransformTo(hlg, &pool));
   image.metadata.m.color_encoding = hlg;
   JXL_CHECK(jxl::EncodeToFile(image, output_filename, &pool));
+  return EXIT_SUCCESS;
 }

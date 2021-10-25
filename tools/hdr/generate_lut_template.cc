@@ -11,6 +11,7 @@
 #include "tools/args.h"
 #include "tools/cmdline.h"
 
+#include "monolithic_examples.h"
 
 
 
@@ -63,4 +64,5 @@ int main(int argc, const char** argv) {
   output.SetFromImage(std::move(image), jxl::ColorEncoding::SRGB());
   JXL_CHECK(jxl::EncodeToFile(output, jxl::ColorEncoding::SRGB(), 16,
                               output_filename, &pool));
+  return EXIT_SUCCESS;
 }

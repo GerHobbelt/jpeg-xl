@@ -17,6 +17,10 @@
 #include "jxl/decode.h"
 #include "jxl/decode_cxx.h"
 
+#include "monolithic_examples.h"
+
+
+
 static bool DecodeJpegXlExif(const uint8_t* jxl, size_t size,
                       std::vector<uint8_t>* exif) {
   auto dec = JxlDecoderMake(nullptr);
@@ -136,7 +140,7 @@ static bool WriteFile(const char* filename, const uint8_t* data, size_t size) {
 #define main(cnt, arr) jpegXL_decode_EXIF_metadata_main(cnt, arr)
 #endif
 
-int main(int argc, char* argv[]) {
+int main(int argc, const char** argv) {
   if (argc != 3) {
     fprintf(stderr,
             "Usage: %s <jxl> <exif>\n"
