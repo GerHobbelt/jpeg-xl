@@ -17,7 +17,7 @@
 #include "jxl/decode.h"
 #include "jxl/decode_cxx.h"
 
-bool DecodeJpegXlExif(const uint8_t* jxl, size_t size,
+static bool DecodeJpegXlExif(const uint8_t* jxl, size_t size,
                       std::vector<uint8_t>* exif) {
   auto dec = JxlDecoderMake(nullptr);
 
@@ -85,7 +85,7 @@ bool DecodeJpegXlExif(const uint8_t* jxl, size_t size,
   }
 }
 
-bool LoadFile(const char* filename, std::vector<uint8_t>* out) {
+static bool LoadFile(const char* filename, std::vector<uint8_t>* out) {
   FILE* file = fopen(filename, "rb");
   if (!file) {
     return false;
@@ -117,7 +117,7 @@ bool LoadFile(const char* filename, std::vector<uint8_t>* out) {
   return readsize == static_cast<size_t>(size);
 }
 
-bool WriteFile(const char* filename, const uint8_t* data, size_t size) {
+static bool WriteFile(const char* filename, const uint8_t* data, size_t size) {
   FILE* file = fopen(filename, "wb");
   if (!file) {
     fprintf(stderr, "Could not open %s for writing", filename);

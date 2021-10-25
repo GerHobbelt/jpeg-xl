@@ -28,7 +28,7 @@
  * 0..1 but may go beyond this range for HDR or wide gamut. The ICC profile
  * describes the color format of the pixel data.
  */
-bool DecodeJpegXlOneShot(const uint8_t* jxl, size_t size,
+static bool DecodeJpegXlOneShot(const uint8_t* jxl, size_t size,
                          std::vector<float>* pixels, size_t* xsize,
                          size_t* ysize, std::vector<uint8_t>* icc_profile) {
   // Multi-threaded parallel runner.
@@ -133,7 +133,7 @@ bool DecodeJpegXlOneShot(const uint8_t* jxl, size_t size,
  * The input pixels are given as 32-bit floating point with 4-channel RGBA.
  * The alpha channel will not be written since .pfm does not support it.
  */
-bool WritePFM(const char* filename, const float* pixels, size_t xsize,
+static bool WritePFM(const char* filename, const float* pixels, size_t xsize,
               size_t ysize) {
   FILE* file = fopen(filename, "wb");
   if (!file) {
@@ -160,7 +160,7 @@ bool WritePFM(const char* filename, const float* pixels, size_t xsize,
   return true;
 }
 
-bool LoadFile(const char* filename, std::vector<uint8_t>* out) {
+static bool LoadFile(const char* filename, std::vector<uint8_t>* out) {
   FILE* file = fopen(filename, "rb");
   if (!file) {
     return false;
@@ -192,7 +192,7 @@ bool LoadFile(const char* filename, std::vector<uint8_t>* out) {
   return readsize == static_cast<size_t>(size);
 }
 
-bool WriteFile(const char* filename, const uint8_t* data, size_t size) {
+static bool WriteFile(const char* filename, const uint8_t* data, size_t size) {
   FILE* file = fopen(filename, "wb");
   if (!file) {
     fprintf(stderr, "Could not open %s for writing", filename);

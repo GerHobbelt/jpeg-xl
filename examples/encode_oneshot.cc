@@ -29,7 +29,7 @@
  * @param xsize set to width of loaded image
  * @param ysize set to height of loaded image
  */
-bool ReadPFM(const char* filename, std::vector<float>* pixels, uint32_t* xsize,
+static bool ReadPFM(const char* filename, std::vector<float>* pixels, uint32_t* xsize,
              uint32_t* ysize) {
   FILE* file = fopen(filename, "rb");
   if (!file) {
@@ -149,7 +149,7 @@ bool ReadPFM(const char* filename, std::vector<float>* pixels, uint32_t* xsize,
  * @param ysize height of the input image
  * @param compressed will be populated with the compressed bytes
  */
-bool EncodeJxlOneshot(const std::vector<float>& pixels, const uint32_t xsize,
+static bool EncodeJxlOneshot(const std::vector<float>& pixels, const uint32_t xsize,
                       const uint32_t ysize, std::vector<uint8_t>* compressed) {
   auto enc = JxlEncoderMake(/*memory_manager=*/nullptr);
   auto runner = JxlThreadParallelRunnerMake(
@@ -218,7 +218,7 @@ bool EncodeJxlOneshot(const std::vector<float>& pixels, const uint32_t xsize,
 /**
  * Writes bytes to file.
  */
-bool WriteFile(const std::vector<uint8_t>& bytes, const char* filename) {
+static bool WriteFile(const std::vector<uint8_t>& bytes, const char* filename) {
   FILE* file = fopen(filename, "wb");
   if (!file) {
     fprintf(stderr, "Could not open %s for writing\n", filename);
