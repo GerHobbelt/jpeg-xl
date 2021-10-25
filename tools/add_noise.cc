@@ -21,6 +21,13 @@
 #include "lib/jxl/enc_photon_noise.h"
 #include "lib/jxl/enc_xyb.h"
 
+
+
+
+#if defined(BUILD_MONOLITHIC)
+#define main(cnt, arr) jpegXL_add_noise_main(cnt, arr)
+#endif
+
 int main(int argc, const char** argv) {
   if (argc != 4) {
     fprintf(stderr, "Usage: %s <iso> <input.png> <output.png>\n", argv[0]);

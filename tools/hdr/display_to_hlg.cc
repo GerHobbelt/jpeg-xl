@@ -13,6 +13,12 @@
 #include "tools/args.h"
 #include "tools/cmdline.h"
 
+
+
+#if defined(BUILD_MONOLITHIC)
+#define main(cnt, arr) jpegXL_display_to_hlg_main(cnt, arr)
+#endif
+
 int main(int argc, const char** argv) {
   jxl::ThreadPoolInternal pool;
 

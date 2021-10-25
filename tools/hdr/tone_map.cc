@@ -12,6 +12,13 @@
 #include "tools/args.h"
 #include "tools/cmdline.h"
 
+
+
+
+#if defined(BUILD_MONOLITHIC)
+#define main(cnt, arr) jpegXL_tone_map_main(cnt, arr)
+#endif
+
 int main(int argc, const char** argv) {
   jxl::ThreadPoolInternal pool;
 

@@ -130,6 +130,12 @@ bool WriteFile(const char* filename, const uint8_t* data, size_t size) {
   return true;
 }
 
+
+
+#if defined(BUILD_MONOLITHIC)
+#define main(cnt, arr) jpegXL_decode_EXIF_metadata_main(cnt, arr)
+#endif
+
 int main(int argc, char* argv[]) {
   if (argc != 3) {
     fprintf(stderr,
