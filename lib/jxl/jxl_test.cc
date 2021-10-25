@@ -133,7 +133,7 @@ TEST(JxlTest, RoundtripTinyFast) {
 
   CodecInOut io2;
   const size_t enc_bytes = Roundtrip(&io, cparams, dparams, pool, &io2);
-  printf("32x32 image size %zu bytes\n", enc_bytes);
+  printf("32x32 image size %" PRIuS " bytes\n", enc_bytes);
 }
 
 TEST(JxlTest, RoundtripSmallD1) {
@@ -551,7 +551,7 @@ TEST(JxlTest, RoundtripSmallPatchesAlpha) {
   EXPECT_LE(Roundtrip(&io, cparams, dparams, pool, &io2), 2000u);
   EXPECT_THAT(ButteraugliDistance(io, io2, cparams.ba_params,
                                   /*distmap=*/nullptr, pool),
-              IsSlightlyBelow(0.3f));
+              IsSlightlyBelow(0.22f));
 }
 
 TEST(JxlTest, RoundtripSmallPatches) {
@@ -579,7 +579,7 @@ TEST(JxlTest, RoundtripSmallPatches) {
   EXPECT_LE(Roundtrip(&io, cparams, dparams, pool, &io2), 2000u);
   EXPECT_THAT(ButteraugliDistance(io, io2, cparams.ba_params,
                                   /*distmap=*/nullptr, pool),
-              IsSlightlyBelow(0.3f));
+              IsSlightlyBelow(0.22f));
 }
 
 // Test header encoding of original bits per sample
@@ -686,7 +686,7 @@ TEST(JxlTest, RoundtripGrayscale) {
     EXPECT_LE(compressed.size(), 7000u);
     EXPECT_THAT(ButteraugliDistance(io, io2, cparams.ba_params,
                                     /*distmap=*/nullptr, pool),
-                IsSlightlyBelow(1.5));
+                IsSlightlyBelow(1.6));
   }
 
   // Test with larger butteraugli distance and other settings enabled so

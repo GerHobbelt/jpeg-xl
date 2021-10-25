@@ -610,7 +610,7 @@ Status ModularFrameEncoder::ComputeEncodingData(
       int min, max;
       compute_minmax(gi.channel[gi.nb_meta_channels + i], &min, &max);
       int64_t colors = max - min + 1;
-      JXL_DEBUG_V(10, "Channel %zu: range=%i..%i", i, min, max);
+      JXL_DEBUG_V(10, "Channel %" PRIuS ": range=%i..%i", i, min, max);
       Transform maybe_palette_1(TransformId::kPalette);
       maybe_palette_1.begin_c = i + gi.nb_meta_channels;
       maybe_palette_1.num_c = 1;
@@ -1283,7 +1283,7 @@ Status ModularFrameEncoder::PrepareStreamParams(const Rect& rect,
         int min, max;
         compute_minmax(gi.channel[gi.nb_meta_channels + i], &min, &max);
         int colors = max - min + 1;
-        JXL_DEBUG_V(10, "Channel %zu: range=%i..%i", i, min, max);
+        JXL_DEBUG_V(10, "Channel %" PRIuS ": range=%i..%i", i, min, max);
         Transform maybe_palette_1(TransformId::kPalette);
         maybe_palette_1.begin_c = i + gi.nb_meta_channels;
         maybe_palette_1.num_c = 1;
@@ -1384,6 +1384,7 @@ Status ModularFrameEncoder::PrepareStreamParams(const Rect& rect,
   return true;
 }
 
+constexpr float q_deadzone = 0.62f;
 int QuantizeWP(const int32_t* qrow, size_t onerow, size_t c, size_t x, size_t y,
                size_t w, weighted::State* wp_state, float value,
                float inv_factor) {
@@ -1391,6 +1392,7 @@ int QuantizeWP(const int32_t* qrow, size_t onerow, size_t c, size_t x, size_t y,
   PredictionResult pred =
       PredictNoTreeWP(w, qrow + x, onerow, x, y, Predictor::Weighted, wp_state);
   svalue -= pred.guess;
+  if (svalue > -q_deadzone && svalue < q_deadzone) svalue = 0;
   int residual = roundf(svalue);
   if (residual > 2 || residual < -2) residual = roundf(svalue * 0.5) * 2;
   return residual + pred.guess;
@@ -1402,6 +1404,7 @@ int QuantizeGradient(const int32_t* qrow, size_t onerow, size_t c, size_t x,
   PredictionResult pred =
       PredictNoTreeNoWP(w, qrow + x, onerow, x, y, Predictor::Gradient);
   svalue -= pred.guess;
+  if (svalue > -q_deadzone && svalue < q_deadzone) svalue = 0;
   int residual = roundf(svalue);
   if (residual > 2 || residual < -2) residual = roundf(svalue * 0.5) * 2;
   return residual + pred.guess;
@@ -1421,7 +1424,7 @@ void ModularFrameEncoder::AddVarDCTDC(const Image3F& dc, size_t group_index,
   if (cparams.speed_tier >= SpeedTier::kSquirrel) {
     stream_options[stream_id].tree_kind = ModularOptions::TreeKind::kWPFixedDC;
   }
-  if (cparams.speed_tier < SpeedTier::kSquirrel && jpeg_transcode) {
+  if (cparams.speed_tier < SpeedTier::kSquirrel && !nl_dc) {
     stream_options[stream_id].predictor =
         (cparams.speed_tier < SpeedTier::kKitten ? Predictor::Variable
                                                  : Predictor::Best);

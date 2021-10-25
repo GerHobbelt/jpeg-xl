@@ -221,8 +221,8 @@ Status DecodeFrame(const DecompressParams& dparams,
       if (dparams.max_downsampling > 1 && s == FrameDecoder::kSkipped) {
         continue;
       }
-      return JXL_FAILURE("Invalid section %zu status: %d", section_info[i].id,
-                         s);
+      return JXL_FAILURE("Invalid section %" PRIuS " status: %d",
+                         section_info[i].id, s);
     }
   }
 
@@ -379,7 +379,8 @@ Status FrameDecoder::ProcessDCGlobal(BitReader* br) {
   // Splines' draw cache uses the color correlation map.
   if (shared.frame_header.flags & FrameHeader::kSplines) {
     JXL_RETURN_IF_ERROR(shared.image_features.splines.InitializeDrawCache(
-        frame_dim_.xsize, frame_dim_.ysize, dec_state_->shared->cmap));
+        frame_dim_.xsize_upsampled_padded, frame_dim_.ysize_upsampled_padded,
+        dec_state_->shared->cmap));
   }
   Status dec_status = modular_frame_decoder_.DecodeGlobalInfo(
       br, frame_header_, allow_partial_dc_global_);
@@ -958,8 +959,10 @@ Status FrameDecoder::FinalizeFrame() {
       if (reference_frame.frame->xsize() < metadata->xsize() ||
           reference_frame.frame->ysize() < metadata->ysize()) {
         return JXL_FAILURE(
-            "trying to save a reference frame that is too small: %zux%zu "
-            "instead of %zux%zu",
+            "trying to save a reference frame that is too small: %" PRIuS
+            "x%" PRIuS
+            " "
+            "instead of %" PRIuS "x%" PRIuS,
             reference_frame.frame->xsize(), reference_frame.frame->ysize(),
             metadata->xsize(), metadata->ysize());
       }
