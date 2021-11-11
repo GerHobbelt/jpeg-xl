@@ -140,7 +140,7 @@ Status UndoXYBInPlace(Image3F* idct, const Rect& rect,
     DoUndoXYBInPlace(idct, rect, Op709(), output_encoding_info);
   } else if (output_encoding_info.color_encoding.tf.IsGamma() ||
              output_encoding_info.color_encoding.tf.IsDCI()) {
-    OpGamma op = {output_encoding_info.inverse_gamma};
+    OpGamma op{output_encoding_info.inverse_gamma};
     DoUndoXYBInPlace(idct, rect, op, output_encoding_info);
   } else {
     // This is a programming error.
@@ -418,10 +418,13 @@ HWY_EXPORT(DoYCbCrUpsampling);
 void UndoXYB(const Image3F& src, Image3F* dst,
              const OutputEncodingInfo& output_info, ThreadPool* pool) {
   CopyImageTo(src, dst);
-  pool->Run(0, src.ysize(), ThreadPool::SkipInit(), [&](int y, int /*thread*/) {
-    JXL_CHECK(HWY_DYNAMIC_DISPATCH(UndoXYBInPlace)(dst, Rect(*dst).Line(y),
-                                                   output_info));
-  });
+  RunOnPool(
+      pool, 0, src.ysize(), ThreadPool::SkipInit(),
+      [&](int y, int /*thread*/) {
+        JXL_CHECK(HWY_DYNAMIC_DISPATCH(UndoXYBInPlace)(dst, Rect(*dst).Line(y),
+                                                       output_info));
+      },
+      "UndoXYB");
 }
 
 namespace {
@@ -1057,7 +1060,8 @@ Status FinalizeImageRect(
          dec_state->rgb_output_is_rgba, alpha,
          alpha_rect.Lines(available_y, num_ys),
          upsampled_frame_rect.Lines(available_y, num_ys)
-             .Crop(Rect(0, 0, frame_dim.xsize, frame_dim.ysize)),
+             .Crop(Rect(0, 0, frame_dim.xsize_upsampled,
+                        frame_dim.ysize_upsampled)),
          dec_state->rgb_output, dec_state->rgb_stride);
       }
       if (dec_state->pixel_callback != nullptr) {

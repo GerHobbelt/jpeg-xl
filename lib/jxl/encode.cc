@@ -335,6 +335,12 @@ JxlEncoderStatus JxlEncoderOptionsSetInteger(JxlEncoderOptions* options,
       if (value == -1) value = 1;
       options->values.cparams.ec_resampling = value;
       return JXL_ENC_SUCCESS;
+    case JXL_ENC_OPTION_PHOTON_NOISE:
+      if (value < 0) return JXL_ENC_ERROR;
+      // TODO(lode): add encoder setting to set the 8 floating point values of
+      // the noise synthesis parameters per frame for more fine grained control.
+      options->values.cparams.photon_noise_iso = static_cast<float>(value);
+      return JXL_ENC_SUCCESS;
     case JXL_ENC_OPTION_NOISE:
       if (value < -1 || value > 1) return JXL_ENC_ERROR;
       options->values.cparams.noise = static_cast<jxl::Override>(value);
@@ -346,6 +352,10 @@ JxlEncoderStatus JxlEncoderOptionsSetInteger(JxlEncoderOptions* options,
     case JXL_ENC_OPTION_PATCHES:
       if (value < -1 || value > 1) return JXL_ENC_ERROR;
       options->values.cparams.patches = static_cast<jxl::Override>(value);
+      return JXL_ENC_SUCCESS;
+    case JXL_ENC_OPTION_EPF:
+      if (value < -1 || value > 3) return JXL_ENC_ERROR;
+      options->values.cparams.epf = static_cast<int>(value);
       return JXL_ENC_SUCCESS;
     case JXL_ENC_OPTION_GABORISH:
       if (value < -1 || value > 1) return JXL_ENC_ERROR;
@@ -359,6 +369,95 @@ JxlEncoderStatus JxlEncoderOptionsSetInteger(JxlEncoderOptions* options,
       } else {
         return JXL_ENC_ERROR;
       }
+      return JXL_ENC_SUCCESS;
+    case JXL_ENC_OPTION_KEEP_INVISIBLE:
+      if (value < -1 || value > 1) return JXL_ENC_ERROR;
+      options->values.cparams.keep_invisible =
+          static_cast<jxl::Override>(value);
+      return JXL_ENC_SUCCESS;
+    case JXL_ENC_OPTION_GROUP_ORDER:
+      if (value < -1 || value > 1) return JXL_ENC_ERROR;
+      options->values.cparams.centerfirst = (value == 1);
+      return JXL_ENC_SUCCESS;
+    case JXL_ENC_OPTION_GROUP_ORDER_CENTER_X:
+      if (value < -1) return JXL_ENC_ERROR;
+      options->values.cparams.center_x = static_cast<size_t>(value);
+      return JXL_ENC_SUCCESS;
+    case JXL_ENC_OPTION_GROUP_ORDER_CENTER_Y:
+      if (value < -1) return JXL_ENC_ERROR;
+      options->values.cparams.center_y = static_cast<size_t>(value);
+      return JXL_ENC_SUCCESS;
+    case JXL_ENC_OPTION_RESPONSIVE:
+      if (value < -1 || value > 1) return JXL_ENC_ERROR;
+      options->values.cparams.responsive = value;
+      return JXL_ENC_SUCCESS;
+    case JXL_ENC_OPTION_PROGRESSIVE_AC:
+      if (value < -1 || value > 1) return JXL_ENC_ERROR;
+      options->values.cparams.progressive_mode = value;
+      return JXL_ENC_SUCCESS;
+    case JXL_ENC_OPTION_QPROGRESSIVE_AC:
+      if (value < -1 || value > 1) return JXL_ENC_ERROR;
+      options->values.cparams.qprogressive_mode = value;
+      return JXL_ENC_SUCCESS;
+    case JXL_ENC_OPTION_PROGRESSIVE_DC:
+      if (value < -1 || value > 2) return JXL_ENC_ERROR;
+      options->values.cparams.progressive_dc = value;
+      return JXL_ENC_SUCCESS;
+    case JXL_ENC_OPTION_CHANNEL_COLORS_PRE_TRANSFORM_PERCENT:
+      if (value < -1 || value > 100) return JXL_ENC_ERROR;
+      if (value == -1) {
+        options->values.cparams.channel_colors_pre_transform_percent = 95.0f;
+      } else {
+        options->values.cparams.channel_colors_pre_transform_percent =
+            static_cast<float>(value);
+      }
+      return JXL_ENC_SUCCESS;
+    case JXL_ENC_OPTION_CHANNEL_COLORS_PERCENT:
+      if (value < -1 || value > 100) return JXL_ENC_ERROR;
+      if (value == -1) {
+        options->values.cparams.channel_colors_percent = 80.0f;
+      } else {
+        options->values.cparams.channel_colors_percent =
+            static_cast<float>(value);
+      }
+      return JXL_ENC_SUCCESS;
+    case JXL_ENC_OPTION_PALETTE_COLORS:
+      if (value < -1 || value > 70913) return JXL_ENC_ERROR;
+      if (value == -1) {
+        options->values.cparams.palette_colors = 1 << 10;
+      } else {
+        options->values.cparams.palette_colors = value;
+      }
+      return JXL_ENC_SUCCESS;
+    case JXL_ENC_OPTION_LOSSY_PALETTE:
+      if (value < -1 || value > 1) return JXL_ENC_ERROR;
+      // TODO(lode): the defaults of some palette settings depend on others.
+      // See the logic in cjxl. Similar for other settings. This should be
+      // handled in the encoder during JxlEncoderProcessOutput (or,
+      // alternatively, in the cjxl binary like now)
+      options->values.cparams.lossy_palette = (value == 1);
+      return JXL_ENC_SUCCESS;
+    case JXL_ENC_OPTION_MODULAR_COLOR_SPACE:
+      // TODO(lode): also add color transform option (xyb, none, ycbcr)
+      if (value < -1 || value > 37) return JXL_ENC_ERROR;
+      options->values.cparams.colorspace = value;
+      return JXL_ENC_SUCCESS;
+    case JXL_ENC_OPTION_MODULAR_GROUP_SIZE:
+      if (value < -1 || value > 3) return JXL_ENC_ERROR;
+      // TODO(lode): the default behavior of this parameter for cjxl is
+      // to choose 1 or 2 depending on the situation. This behavior needs to be
+      // implemented either in the C++ library by allowing to set this to -1, or
+      // kept in cjxl and set it to 1 or 2 using this API.
+      if (value == -1) {
+        options->values.cparams.modular_group_size_shift = 1;
+      } else {
+        options->values.cparams.modular_group_size_shift = value;
+      }
+      return JXL_ENC_SUCCESS;
+    case JXL_ENC_OPTION_MODULAR_PREDICTOR:
+      if (value < -1 || value > 15) return JXL_ENC_ERROR;
+      options->values.cparams.options.predictor =
+          static_cast<jxl::Predictor>(value);
       return JXL_ENC_SUCCESS;
     default:
       return JXL_ENC_ERROR;
@@ -391,7 +490,7 @@ void JxlEncoderReset(JxlEncoder* enc) {
   enc->input_closed = false;
   enc->basic_info_set = false;
   enc->color_encoding_set = false;
-  enc->force_container = false;
+  enc->use_container = false;
   enc->codestream_level = 5;
 }
 
@@ -404,11 +503,11 @@ void JxlEncoderDestroy(JxlEncoder* enc) {
 }
 
 JxlEncoderStatus JxlEncoderUseContainer(JxlEncoder* enc,
-                                        JXL_BOOL force_container) {
+                                        JXL_BOOL use_container) {
   if (enc->wrote_bytes) {
     return JXL_API_ERROR("this setting can only be set at the beginning");
   }
-  enc->force_container = static_cast<bool>(force_container);
+  enc->use_container = static_cast<bool>(use_container);
   return JXL_ENC_SUCCESS;
 }
 

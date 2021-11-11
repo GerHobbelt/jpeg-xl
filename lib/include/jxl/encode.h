@@ -13,6 +13,7 @@
 #ifndef JXL_ENCODE_H_
 #define JXL_ENCODE_H_
 
+#include "jxl/codestream_header.h"
 #include "jxl/decode.h"
 #include "jxl/jxl_export.h"
 #include "jxl/memory_manager.h"
@@ -109,31 +110,127 @@ typedef enum {
    */
   JXL_ENC_OPTION_EXTRA_CHANNEL_RESAMPLING = 3,
 
-  /** Enables or disables noise generation. Integer option, use -1 for the
-   * encoder default, 0 to disable, 1 to enable.
+  /** Adds noise to the image emulating photographic film noise, the higher the
+   * given number, the grainier the image will be. As an example, a value of 100
+   * gives low noise whereas a value of 3200 gives a lot of noise. The default
+   * value is 0.
    */
-  JXL_ENC_OPTION_NOISE = 4,
+  JXL_ENC_OPTION_PHOTON_NOISE = 4,
 
-  /** Enables or disables dots generation. Integer option, use -1 for the
-   * encoder default, 0 to disable, 1 to enable.
+  /** Enables adaptive noise generation. This setting is not recommended for
+   * use, please use JXL_ENC_OPTION_PHOTON_NOISE instead. Use -1 for the default
+   * (encoder chooses), 0 to disable, 1 to enable.
    */
-  JXL_ENC_OPTION_DOTS = 5,
+  JXL_ENC_OPTION_NOISE = 5,
 
-  /** Enables or disables patches generation. Integer option, use -1 for the
-   * encoder default, 0 to disable, 1 to enable.
+  /** Enables or disables dots generation. Use -1 for the default (encoder
+   * chooses), 0 to disable, 1 to enable.
    */
-  JXL_ENC_OPTION_PATCHES = 6,
+  JXL_ENC_OPTION_DOTS = 6,
 
-  /** Enables or disables the gaborish filter. Integer option, use -1 for the
-   * encoder default, 0 to disable, 1 to enable.
+  /** Enables or disables patches generation. Use -1 for the default (encoder
+   * chooses), 0 to disable, 1 to enable.
    */
-  JXL_ENC_OPTION_GABORISH = 7,
+  JXL_ENC_OPTION_PATCHES = 7,
 
-  /** Enables modular encoding. Integer option, use -1 for default (encoder
+  /** Edge preserving filter level, -1 to 3. Use -1 for the default (encoder
+   * chooses), 0 to 3 to set a strength.
+   */
+  JXL_ENC_OPTION_EPF = 8,
+
+  /** Enables or disables the gaborish filter. Use -1 for the default (encoder
+   * chooses), 0 to disable, 1 to enable.
+   */
+  JXL_ENC_OPTION_GABORISH = 9,
+
+  /** Enables modular encoding. Use -1 for default (encoder
    * chooses), 0 to enforce VarDCT mode (e.g. for photographic images), 1 to
    * enforce modular mode (e.g. for lossless images).
    */
-  JXL_ENC_OPTION_MODULAR = 8,
+  JXL_ENC_OPTION_MODULAR = 10,
+
+  /** Enables or disables preserving color of invisible pixels. Use -1 for the
+   * default (1 if lossless, 0 if lossy), 0 to disable, 1 to enable.
+   */
+  JXL_ENC_OPTION_KEEP_INVISIBLE = 11,
+
+  /** Determines the order in which 256x256 regions are stored in the codestream
+   * for progressive rendering. Use -1 for the encoder
+   * default, 0 for scanline order, 1 for center-first order.
+   */
+  JXL_ENC_OPTION_GROUP_ORDER = 12,
+
+  /** Determines the horizontal position of center for the center-first group
+   * order. Use -1 to automatically use the middle of the image, 0..xsize to
+   * specifically set it.
+   */
+  JXL_ENC_OPTION_GROUP_ORDER_CENTER_X = 13,
+
+  /** Determines the center for the center-first group order. Use -1 to
+   * automatically use the middle of the image, 0..ysize to specifically set it.
+   */
+  JXL_ENC_OPTION_GROUP_ORDER_CENTER_Y = 14,
+
+  /** Enables or disables progressive encoding for modular mode. Use -1 for the
+   * encoder default, 0 to disable, 1 to enable.
+   */
+  JXL_ENC_OPTION_RESPONSIVE = 15,
+
+  /** Set the progressive mode for the AC coefficients of VarDCT, using spectral
+   * progression from the DCT coefficients. Use -1 for the encoder default, 0 to
+   * disable, 1 to enable.
+   */
+  JXL_ENC_OPTION_PROGRESSIVE_AC = 16,
+
+  /** Set the progressive mode for the AC coefficients of VarDCT, using
+   * quantization of the least significant bits. Use -1 for the encoder default,
+   * 0 to disable, 1 to enable.
+   */
+  JXL_ENC_OPTION_QPROGRESSIVE_AC = 17,
+
+  /** Set the progressive mode using lower-resolution DC images for VarDCT. Use
+   * -1 for the encoder default, 0 to disable, 1 to have an extra 64x64 lower
+   * resolution pass, 2 to have a 512x512 and 64x64 lower resolution pass.
+   */
+  JXL_ENC_OPTION_PROGRESSIVE_DC = 18,
+
+  /** Use Global channel palette if the amount of colors is smaller than this
+   * percentage of range. Use 0-100 to set an explicit percentage, -1 to use the
+   * encoder default. Used for modular encoding.
+   */
+  JXL_ENC_OPTION_CHANNEL_COLORS_PRE_TRANSFORM_PERCENT = 19,
+
+  /** Use Local channel palette if the amount of colors is smaller than this
+   * percentage of range. Use 0-100 to set an explicit percentage, -1 to use the
+   * encoder default. Used for modular encoding.
+   */
+  JXL_ENC_OPTION_CHANNEL_COLORS_PERCENT = 20,
+
+  /** Use color palette if amount of colors is smaller than or equal to this
+   * amount, or -1 to use the encoder default. Used for modular encoding.
+   */
+  JXL_ENC_OPTION_PALETTE_COLORS = 21,
+
+  /** Enables or disables delta palette. Use -1 for the default (encoder
+   * chooses), 0 to disable, 1 to enable. Used in modular mode.
+   */
+  JXL_ENC_OPTION_LOSSY_PALETTE = 22,
+
+  /** Color space for modular encoding: 0=RGB, 1=YCoCg, 2-37=RCT, -1=default:
+   * try several, depending on speed.
+   */
+  JXL_ENC_OPTION_MODULAR_COLOR_SPACE = 23,
+
+  /** Group size for modular encoding: -1=default, 0=128, 1=256, 2=512, 3=1024.
+   */
+  JXL_ENC_OPTION_MODULAR_GROUP_SIZE = 24,
+
+  /** Predictor for modular encoding. -1 = default, 0=zero, 1=left, 2=top,
+   * 3=avg0, 4=select, 5=gradient, 6=weighted, 7=topright, 8=topleft,
+   * 9=leftleft, 10=avg1, 11=avg2, 12=avg3, 13=toptop predictive average 14=mix
+   * 5 and 6, 15=mix everything.
+   */
+  JXL_ENC_OPTION_MODULAR_PREDICTOR = 25,
 
   /** Enum value not to be used as an option. This value is added to force the
    * C compiler to have the enum to take a known size.
@@ -239,11 +336,20 @@ JXL_EXPORT JxlEncoderStatus JxlEncoderAddJPEGFrame(
  * Sets the buffer to read pixels from for the next image to encode. Must call
  * JxlEncoderSetBasicInfo before JxlEncoderAddImageFrame.
  *
- * Currently only some pixel formats are supported:
+ * Currently only some data types for pixel formats are supported:
  * - JXL_TYPE_UINT8
  * - JXL_TYPE_UINT16
  * - JXL_TYPE_FLOAT16, with nominal range 0..1
  * - JXL_TYPE_FLOAT, with nominal range 0..1
+ *
+ * We support interleaved channels as described by the JxlPixelFormat:
+ * - single-channel data, e.g. grayscale
+ * - single-channel + alpha
+ * - trichromatic, e.g. RGB
+ * - trichromatic + alpha
+ *
+ * Extra channels not handled here need to be set by @ref
+ * JxlEncoderSetExtraChannelBuffer.
  *
  * The color profile of the pixels depends on the value of uses_original_profile
  * in the JxlBasicInfo. If true, the pixels are assumed to be encoded in the
@@ -265,7 +371,152 @@ JXL_EXPORT JxlEncoderStatus JxlEncoderAddImageFrame(
     const void* buffer, size_t size);
 
 /**
- * Declares that this encoder will not encode anything further.
+ * Sets the buffer to read pixels from for an extra channel at a given index.
+ * The index must be smaller than the num_extra_channels in the associated
+ * JxlBasicInfo. Must call @ref JxlEncoderSetExtraChannelInfo before
+ * JxlEncoderSetExtraChannelBuffer.
+ *
+ * TODO(firsching): mention what data types in pixel formats are supported.
+ *
+ * It is required to call this function for every extra channel, except for the
+ * alpha channel if that was already set through @ref JxlEncoderAddImageFrame.
+ *
+ * @param options set of encoder options to use when encoding the extra channel.
+ * @param pixel_format format for pixels. Object owned by the caller and its
+ * contents are copied internally. The num_channels value is ignored, since the
+ * number of channels for an extra channel is always assumed to be one.
+ * @param buffer buffer type to input the pixel data from. Owned by the caller
+ * and its contents are copied internally.
+ * @param size size of buffer in bytes.
+ * @param index index of the extra channel to use.
+ * @return JXL_ENC_SUCCESS on success, JXL_ENC_ERROR on error
+ */
+JXL_EXPORT JxlEncoderStatus JxlEncoderSetExtraChannelBuffer(
+    const JxlEncoderOptions* options, const JxlPixelFormat* pixel_format,
+    const void* buffer, size_t size, uint32_t index);
+
+/** Adds a metadata box to the file format. JxlEncoderProcessOutput must be used
+ * to effectively write the box to the output. @ref JxlEncoderUseContainer must
+ * be enabled before using this function.
+ *
+ * Background information about the container format and boxes follows here:
+ *
+ * For users of libjxl, boxes allow inserting application-specific data and
+ * metadata (Exif, XML, JUMBF and user defined boxes).
+ *
+ * The box format follows ISO BMFF and shares features and box types with other
+ * image and video formats, including the Exif, XML and JUMBF boxes. The box
+ * format for JPEG XL is specified in ISO/IEC 18181-2.
+ *
+ * Boxes in general don't contain other boxes inside, except a JUMBF superbox.
+ * Boxes follow each other sequentially and are byte-aligned. If the container
+ * format is used, the JXL stream exists out of 3 or more concatenated boxes.
+ * It is also possible to use a direct codestream without boxes, but in that
+ * case metadata cannot be added.
+ *
+ * Each box generally has the following byte structure in the file:
+ * - 4 bytes: box size including box header (Big endian. If set to 0, an
+ *   8-byte 64-bit size follows instead).
+ * - 4 bytes: type, e.g. "JXL " for the signature box, "jxlc" for a codestream
+ *   box.
+ * - N bytes: box contents.
+ *
+ * Only the box contents are provided to the contents argument of this function,
+ * the encoder encodes the size header itself.
+ *
+ * Box types are given by 4 characters. A list of known types follows:
+ * - "JXL ": mandatory signature box, must come first, 12 bytes long including
+ *   the box header
+ * - "ftyp": a second mandatory signature box, must come second, 20 bytes long
+ *   including the box header
+ * - "jxll": A JXL level box. This indicates if the codestream is level 5 or
+ *   level 10 compatible. If not present, it is level 5. Level 10 allows more
+ *   features such as very high image resolution and bit-depths above 16 bits
+ *   per channel. Added automatically by the encoder when
+ *   JxlEncoderSetCodestreamLevel is used
+ * - "jxlc": a box with the image codestream, in case the codestream is not
+ *   split across multiple boxes. The codestream contains the JPEG XL image
+ *   itself, including the basic info such as image dimensions, ICC color
+ *   profile, and all the pixel data of all the image frames.
+ * - "jxlp": a codestream box in case it is split across multiple boxes. The
+ *   encoder will automatically do this if necessary. The contents are the same
+ *   as in case of a jxlc box, when concatenated.
+ * - "Exif": a box with EXIF metadata, can be added by libjxl users, or is
+ *   automatically added when needed for JPEG reconstruction. The contents of
+ *   this box must be prepended by a 4-byte tiff header offset, which may
+ *   be 4 zero bytes.
+ * - "XML ": a box with XMP or IPTC metadata, can be added by libjxl users, or
+ *   is automatically added when needed for JPEG reconstruction
+ * - "jumb": a JUMBF superbox, which can contain boxes with different types of
+ *   metadata inside. This box type can be added by the encoder transparently,
+ *   and other libraries to create and handle JUMBF content exist.
+ * - "brob": a Brotli-compressed box, which otherwise represents an existing
+ *   type of box such as Exif or XML. The encoder creates these when enabled and
+ *   users of libjxl don't need to create them directly. Some box types are not
+ *   allowed to be compressed: any of the signature, jxl* and jbrd boxes.
+ * - "jxli": frame index box, can list the keyframes in case of a JXL animation,
+ *   allowing the decoder to jump to individual frames more efficiently. This
+ *   box type is specified, but not currently supported by the encoder or
+ *   decoder.
+ * - "jbrd": JPEG reconstruction box, contains the information required to
+ *   byte-for-byte losslessly recontruct a JPEG-1 image. The JPEG coefficients
+ *   (pixel content) themselves are encoded in the JXL codestream (jxlc or jxlp)
+ *   itself. Exif and XMP metadata will be encoded in Exif and XMP boxes. The
+ *   jbrd box itself contains information such as the app markers of the JPEG-1
+ *   file and everything else required to fit the information together into the
+ *   exact original JPEG file. This box is added automatically by the encoder
+ *   when needed, and only when JPEG reconstruction is used.
+ * - other: other application-specific boxes can be added. Their typename should
+ *   not begin with "jxl" or "JXL" or conflict with other existing typenames.
+ *
+ * Most boxes are automatically added by the encoder and should not be added
+ * with JxlEncoderAddBox. Boxes that one may wish to add with JxlEncoderAddBox
+ * are: Exif and XML (but not when using JPEG reconstruction since if the
+ * JPEG has those, these boxes are already added automatically), jumb, and
+ * application-specific boxes.
+ *
+ * Adding metadata boxes increases the filesize. When adding Exif metadata, the
+ * data must be in sync with what is encoded in the JPEG XL codestream,
+ * specifically the image orientation. While this is not recommended in
+ * practice, in case of conflicting metadata, the JPEG XL codestream takes
+ * precedence.
+ *
+ * It is possible to create a codestream without boxes, then what would be in
+ * the jxlc box is written directly to the output
+ *
+ * It is possible to split the codestream across multiple boxes, in that case
+ * multiple boxes of type jxlp are used. This is handled by the encoder when
+ * needed.
+ *
+ * For now metadata boxes can only be added before or after the codestream with
+ * all frames, so using JxlEncoderAddBox is only possible before the first
+ * JxlEncoderAddImageFrame call, and/or after the last JxlEncoderAddImageFrame
+ * call and JxlEncoderCloseInput. Support for adding boxes in-between the
+ * codestream, and/or in-between image frames may be added later, and would
+ * cause the encoder to use jxlp boxes for the codestream.
+ *
+ * @param enc encoder object.
+ * @param type the box type, e.g. "Exif" for EXIF metadata, "XML " for XMP or
+ * IPTC metadata, "jumb" for JUMBF metadata.
+ * @param contents the full contents of the box, for example EXIF
+ * data. For an "Exif" box, the EXIF data must be prepended by a 4-byte tiff
+ * header offset, which may be 4 zero-bytes. The ISO BMFF box header must not
+ * be included, only the contents.
+ * @param size size of the box contents.
+ * @param compress_box Whether to compress this box as a "brob" box. Requires
+ * Brotli support.
+ * @return JXL_ENC_SUCCESS on success, JXL_ENC_ERROR on error, such as when
+ * using this function without JxlEncoderUseContainer, or adding a box type
+ * that would result in an invalid file format.
+ */
+JXL_EXPORT JxlEncoderStatus JxlEncoderAddBox(JxlEncoder* enc, JxlBoxType type,
+                                             const uint8_t* contents,
+                                             size_t size,
+                                             JXL_BOOL compress_box);
+
+/**
+ * Declares that this encoder will not encode any further frames. Further
+ * metadata boxes may still be added.
  *
  * Must be called between JxlEncoderAddImageFrame/JPEGFrame of the last frame
  * and the next call to JxlEncoderProcessOutput, or JxlEncoderProcessOutput
@@ -320,6 +571,10 @@ JXL_EXPORT void JxlEncoderInitBasicInfo(JxlBasicInfo* info);
 /**
  * Sets the global metadata of the image encoded by this encoder.
  *
+ * If the JxlBasicInfo contains information of extra channels beyond an alpha
+ * channel, then @ref JxlEncoderSetExtraChannelInfo must be called between
+ * JxlEncoderSetBasicInfo and @ref JxlEncoderAddImageFrame.
+ *
  * @param enc encoder object.
  * @param info global image metadata. Object owned by the caller and its
  * contents are copied internally.
@@ -328,6 +583,48 @@ JXL_EXPORT void JxlEncoderInitBasicInfo(JxlBasicInfo* info);
  */
 JXL_EXPORT JxlEncoderStatus JxlEncoderSetBasicInfo(JxlEncoder* enc,
                                                    const JxlBasicInfo* info);
+
+/**
+ * Initializes a JxlExtraChannelInfo struct to default values.
+ * For forwards-compatibility, this function has to be called before values
+ * are assigned to the struct fields.
+ * The default values correspond to an 8-bit channel of the provided type.
+ *
+ * @param type type of the extra channel.
+ * @param info global extra channel metadata. Object owned by the caller and its
+ * contents are copied internally.
+ * @return JXL_ENC_SUCCESS on success, JXL_ENC_ERROR on error
+ */
+JXL_EXPORT void JxlEncoderInitExtraChannelInfo(JxlExtraChannelType type,
+                                               JxlExtraChannelInfo* info);
+
+/**
+ * Sets information for the extra channel at the given index. The index
+ * must be smaller than num_extra_channels in the associated JxlBasicInfo.
+ *
+ * @param enc encoder object
+ * @param index index of the extra channel to set.
+ * @param info global extra channel metadata. Object owned by the caller and its
+ * contents are copied internally.
+ * @return JXL_ENC_SUCCESS on success, JXL_ENC_ERROR on error
+ */
+JXL_EXPORT JxlEncoderStatus JxlEncoderSetExtraChannelInfo(
+    JxlEncoder* enc, size_t index, const JxlExtraChannelInfo* info);
+
+/**
+ * Sets the name for the extra channel at the given index in UTF-8. The index
+ * must be smaller than the num_extra_channels in the associated JxlBasicInfo.
+ *
+ * @param enc encoder object
+ * @param index index of the extra channel to set.
+ * @param name buffer with the name of the extra channel.
+ * @param size size of the name buffer in bytes.
+ * @return JXL_ENC_SUCCESS on success, JXL_ENC_ERROR on error
+ */
+JXL_EXPORT JxlEncoderStatus JxlEncoderSetExtraChannelName(JxlEncoder* enc,
+                                                          size_t index,
+                                                          const char* name,
+                                                          size_t size);
 
 /**
  * Sets a frame-specific option of integer type to the encoder options.
@@ -345,25 +642,29 @@ JXL_EXPORT JxlEncoderStatus JxlEncoderSetBasicInfo(JxlEncoder* enc,
 JXL_EXPORT JxlEncoderStatus JxlEncoderOptionsSetInteger(
     JxlEncoderOptions* options, JxlEncoderOptionId option, int32_t value);
 
-/** Forces the encoder to use the box-based JPEG XL container format (BMFF).
+/** Indicates the encoder should use the box-based JPEG XL container format
+ * (BMFF) instead of outputting the codestream bytes directly. Both with and
+ * without container are valid JPEG XL files, but the container is necessary
+ * when metadata, level 10 features or JPEG reconstruction is used.
  *
  * If enabled, the encoder always uses the container format, even if not
- * necessary. If disabled, the encoder only uses the container format if
- * required (such as for JPEG metadata @ref JxlEncoderStoreJPEGMetadata), and
- * otherwise writes a direct codestream.
+ * necessary. If disabled, the encoder will still use the container format if
+ * required (such as for JPEG metadata @ref JxlEncoderStoreJPEGMetadata).
+ *
+ * This setting must be explicitely enabled before using @ref JxlEncoderAddBox.
  *
  * By default this setting is disabled.
  *
  * This setting can only be set at the beginning, before encoding starts.
  *
  * @param enc encoder object.
- * @param force_container true if the encoder should always output the JPEG XL
+ * @param use_container true if the encoder should always output the JPEG XL
  * container format.
  * @return JXL_ENC_SUCCESS if the operation was successful, JXL_ENC_ERROR
  * otherwise.
  */
 JXL_EXPORT JxlEncoderStatus JxlEncoderUseContainer(JxlEncoder* enc,
-                                                   JXL_BOOL force_container);
+                                                   JXL_BOOL use_container);
 
 /**
  * Configure the encoder to store JPEG reconstruction metadata in the JPEG XL
