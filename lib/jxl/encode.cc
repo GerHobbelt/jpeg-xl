@@ -52,10 +52,18 @@ JxlEncoderStatus JxlEncoderStruct::RefillOutputByteQueue() {
   jxl::BitWriter writer;
 
   if (!wrote_bytes) {
-    if (use_container) {
+    if (MustUseContainer()) {
+      // Add "JXL " and ftyp box.
       output_byte_queue.insert(
           output_byte_queue.end(), jxl::kContainerHeader,
           jxl::kContainerHeader + sizeof(jxl::kContainerHeader));
+      if (codestream_level != 5) {
+        // Add jxll box.
+        output_byte_queue.insert(
+            output_byte_queue.end(), jxl::kLevelBoxHeader,
+            jxl::kLevelBoxHeader + sizeof(jxl::kLevelBoxHeader));
+        output_byte_queue.push_back(codestream_level);
+      }
       if (store_jpeg_metadata && jpeg_metadata.size() > 0) {
         jxl::AppendBoxHeader(jxl::MakeBoxType("jbrd"), jpeg_metadata.size(),
                              false, &output_byte_queue);
@@ -104,7 +112,7 @@ JxlEncoderStatus JxlEncoderStruct::RefillOutputByteQueue() {
 
   jxl::PaddedBytes bytes = std::move(writer).TakeBytes();
 
-  if (use_container && !wrote_bytes) {
+  if (MustUseContainer() && !wrote_bytes) {
     if (input_closed && input_frame_queue.empty()) {
       jxl::AppendBoxHeader(jxl::MakeBoxType("jxlc"), bytes.size(),
                            /*unbounded=*/false, &output_byte_queue);
@@ -255,11 +263,7 @@ JxlEncoderStatus JxlEncoderOptionsSetLossless(JxlEncoderOptions* options,
 
 JxlEncoderStatus JxlEncoderOptionsSetEffort(JxlEncoderOptions* options,
                                             const int effort) {
-  if (effort < 1 || effort > 9) {
-    return JXL_ENC_ERROR;
-  }
-  options->values.cparams.speed_tier = static_cast<jxl::SpeedTier>(10 - effort);
-  return JXL_ENC_SUCCESS;
+  return JxlEncoderOptionsSetInteger(options, JXL_ENC_OPTION_EFFORT, effort);
 }
 
 JxlEncoderStatus JxlEncoderOptionsSetDistance(JxlEncoderOptions* options,
@@ -271,23 +275,42 @@ JxlEncoderStatus JxlEncoderOptionsSetDistance(JxlEncoderOptions* options,
   return JXL_ENC_SUCCESS;
 }
 
-JxlEncoderStatus JxlEncoderOptionsSetAsInteger(JxlEncoderOptions* options,
-                                               JxlEncoderOptionId option,
-                                               int32_t value) {
+JxlEncoderStatus JxlEncoderOptionsSetDecodingSpeed(JxlEncoderOptions* options,
+                                                   int tier) {
+  return JxlEncoderOptionsSetInteger(options, JXL_ENC_OPTION_DECODING_SPEED,
+                                     tier);
+}
+
+JxlEncoderStatus JxlEncoderOptionsSetInteger(JxlEncoderOptions* options,
+                                             JxlEncoderOptionId option,
+                                             int32_t value) {
   switch (option) {
+    case JXL_ENC_OPTION_EFFORT:
+      if (value < 1 || value > 9) {
+        return JXL_ENC_ERROR;
+      }
+      options->values.cparams.speed_tier =
+          static_cast<jxl::SpeedTier>(10 - value);
+      return JXL_ENC_SUCCESS;
+    case JXL_ENC_OPTION_DECODING_SPEED:
+      if (value < 0 || value > 4) {
+        return JXL_ENC_ERROR;
+      }
+      options->values.cparams.decoding_speed_tier = value;
+      return JXL_ENC_SUCCESS;
     case JXL_ENC_OPTION_RESAMPLING:
-      if (value != 0 && value != 1 && value != 2 && value != 4 && value != 8) {
+      if (value != -1 && value != 1 && value != 2 && value != 4 && value != 8) {
         return JXL_ENC_ERROR;
       }
       options->values.cparams.resampling = value;
       return JXL_ENC_SUCCESS;
     case JXL_ENC_OPTION_EXTRA_CHANNEL_RESAMPLING:
-      if (value != 0 && value != 1 && value != 2 && value != 4 && value != 8) {
+      if (value != -1 && value != 1 && value != 2 && value != 4 && value != 8) {
         return JXL_ENC_ERROR;
       }
       // The implementation doesn't support the default choice between 1x1 and
       // 2x2 for extra channels, so 1x1 is set as the default.
-      if (value == 0) value = 1;
+      if (value == -1) value = 1;
       options->values.cparams.ec_resampling = value;
       return JXL_ENC_SUCCESS;
     case JXL_ENC_OPTION_NOISE:
@@ -333,6 +356,8 @@ void JxlEncoderReset(JxlEncoder* enc) {
   enc->input_closed = false;
   enc->basic_info_set = false;
   enc->color_encoding_set = false;
+  enc->force_container = false;
+  enc->codestream_level = 5;
 }
 
 void JxlEncoderDestroy(JxlEncoder* enc) {
@@ -344,14 +369,29 @@ void JxlEncoderDestroy(JxlEncoder* enc) {
 }
 
 JxlEncoderStatus JxlEncoderUseContainer(JxlEncoder* enc,
-                                        JXL_BOOL use_container) {
-  enc->use_container = static_cast<bool>(use_container);
+                                        JXL_BOOL force_container) {
+  if (enc->wrote_bytes) {
+    return JXL_API_ERROR("this setting can only be set at the beginning");
+  }
+  enc->force_container = static_cast<bool>(force_container);
   return JXL_ENC_SUCCESS;
 }
 
 JxlEncoderStatus JxlEncoderStoreJPEGMetadata(JxlEncoder* enc,
                                              JXL_BOOL store_jpeg_metadata) {
+  if (enc->wrote_bytes) {
+    return JXL_API_ERROR("this setting can only be set at the beginning");
+  }
   enc->store_jpeg_metadata = static_cast<bool>(store_jpeg_metadata);
+  return JXL_ENC_SUCCESS;
+}
+
+JxlEncoderStatus JxlEncoderSetCodestreamLevel(JxlEncoder* enc, int level) {
+  if (level != 5 && level != 10) return JXL_API_ERROR("invalid level");
+  if (enc->wrote_bytes) {
+    return JXL_API_ERROR("this setting can only be set at the beginning");
+  }
+  enc->codestream_level = level;
   return JXL_ENC_SUCCESS;
 }
 
@@ -508,15 +548,6 @@ JxlEncoderStatus JxlEncoderProcessOutput(JxlEncoder* enc, uint8_t** next_out,
   if (!enc->output_byte_queue.empty() || !enc->input_frame_queue.empty()) {
     return JXL_ENC_NEED_MORE_OUTPUT;
   }
-  return JXL_ENC_SUCCESS;
-}
-
-JxlEncoderStatus JxlEncoderOptionsSetDecodingSpeed(JxlEncoderOptions* options,
-                                                   int tier) {
-  if (tier < 0 || tier > 4) {
-    return JXL_ENC_ERROR;
-  }
-  options->values.cparams.decoding_speed_tier = tier;
   return JXL_ENC_SUCCESS;
 }
 

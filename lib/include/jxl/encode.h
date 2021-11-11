@@ -73,42 +73,61 @@ typedef enum {
 } JxlEncoderStatus;
 
 /**
- * Id of options to set to JxlEncoderOptions.
+ * Id of per-frame options to set to JxlEncoderOptions with
+ * JxlEncoderOptionsSetInteger.
+ * NOTE: this enum includes most but not all encoder options. The image quality
+ * is a frame option that can be set with JxlEncoderOptionsSetDistance instead.
+ * Options that apply globally, rather than per-frame, are set with their own
+ * functions and do not use the per-frame JxlEncoderOptions.
  */
 typedef enum {
+  /** Sets encoder effort/speed level without affecting decoding speed. Valid
+   * values are, from faster to slower speed: 1:lightning 2:thunder 3:falcon
+   * 4:cheetah 5:hare 6:wombat 7:squirrel 8:kitten 9:tortoise.
+   * Default: squirrel (7).
+   */
+  JXL_ENC_OPTION_EFFORT = 0,
+
+  /** Sets the decoding speed tier for the provided options. Minimum is 0
+   * (slowest to decode, best quality/density), and maximum is 4 (fastest to
+   * decode, at the cost of some quality/density). Default is 0.
+   */
+  JXL_ENC_OPTION_DECODING_SPEED = 1,
+
   /** Sets resampling option. If enabled, the image is downsampled before
    * compression, and upsampled to original size in the decoder. Integer option,
-   * use 0 for the default behavior (resampling only applied for low quality),
+   * use -1 for the default behavior (resampling only applied for low quality),
    * 1 for no downsampling (1x1), 2 for 2x2 downsampling, 4 for 4x4
-   * downsampling, 8 for 8x8 downsampling. The default value is 0.
+   * downsampling, 8 for 8x8 downsampling.
    */
-  JXL_ENC_OPTION_RESAMPLING = 0,
+  JXL_ENC_OPTION_RESAMPLING = 2,
 
   /** Similar to JXL_ENC_OPTION_RESAMPLING, but for extra channels. Integer
-   * option, use 1 for no downsampling (1x1), 2 for 2x2 downsampling, 4 for 4x4
-   * downsampling, 8 for 8x8 downsampling. The default value is 1.
+   * option, use -1 for the default behavior (depends on encoder
+   * implementation), 1 for no downsampling (1x1), 2 for 2x2 downsampling, 4 for
+   * 4x4 downsampling, 8 for 8x8 downsampling.
    */
-  JXL_ENC_OPTION_EXTRA_CHANNEL_RESAMPLING = 1,
+  JXL_ENC_OPTION_EXTRA_CHANNEL_RESAMPLING = 3,
 
   /** Enables or disables noise generation. Integer option, use -1 for the
-   * encoder default, 0 to disable, 1 to enable. The
+   * encoder default, 0 to disable, 1 to enable.
    */
-  JXL_ENC_OPTION_NOISE = 2,
+  JXL_ENC_OPTION_NOISE = 4,
 
   /** Enables or disables dots generation. Integer option, use -1 for the
    * encoder default, 0 to disable, 1 to enable.
    */
-  JXL_ENC_OPTION_DOTS = 3,
+  JXL_ENC_OPTION_DOTS = 5,
 
   /** Enables or disables patches generation. Integer option, use -1 for the
    * encoder default, 0 to disable, 1 to enable.
    */
-  JXL_ENC_OPTION_PATCHES = 4,
+  JXL_ENC_OPTION_PATCHES = 6,
 
   /** Enables or disables the gaborish filter. Integer option, use -1 for the
    * encoder default, 0 to disable, 1 to enable.
    */
-  JXL_ENC_OPTION_GABORISH = 5,
+  JXL_ENC_OPTION_GABORISH = 7,
 
   /** Enum value not to be used as an option. This value is added to force the
    * C compiler to have the enum to take a known size.
@@ -305,14 +324,49 @@ JXL_EXPORT JxlEncoderStatus JxlEncoderSetBasicInfo(JxlEncoder* enc,
                                                    const JxlBasicInfo* info);
 
 /**
+ * Sets a frame-specific option of integer type to the encoder options.
+ * The JxlEncoderOptionId argument determines which option is set.
+ *
+ * @param options set of encoder options to update with the new mode.
+ * @param option ID of the option to set.
+ * @param value Integer value to set for this option.
+ * @return JXL_ENC_SUCCESS if the operation was successful, JXL_ENC_ERROR in
+ * case of an error, such as invalid or unknown option id, or invalid integer
+ * value for the given option. If an error is returned, the state of the
+ * JxlEncoderOptions object is still valid and is the same as before this
+ * function was called.
+ */
+JXL_EXPORT JxlEncoderStatus JxlEncoderOptionsSetInteger(
+    JxlEncoderOptions* options, JxlEncoderOptionId option, int32_t value);
+
+/** Forces the encoder to use the box-based JPEG XL container format (BMFF).
+ *
+ * If enabled, the encoder always uses the container format, even if not
+ * necessary. If disabled, the encoder only uses the container format if
+ * required (such as for JPEG metadata @ref JxlEncoderStoreJPEGMetadata), and
+ * otherwise writes a direct codestream.
+ *
+ * By default this setting is disabled.
+ *
+ * This setting can only be set at the beginning, before encoding starts.
+ *
+ * @param enc encoder object.
+ * @param use_container true if the encoder should always output the JPEG XL
+ * container format.
+ * @return JXL_ENC_SUCCESS if the operation was successful, JXL_ENC_ERROR
+ * otherwise.
+ */
+JXL_EXPORT JxlEncoderStatus JxlEncoderUseContainer(JxlEncoder* enc,
+                                                   JXL_BOOL use_container);
+
+/**
  * Configure the encoder to store JPEG reconstruction metadata in the JPEG XL
  * container.
  *
- * The encoder must be configured to use the JPEG XL container format using @ref
- * JxlEncoderUseContainer for this to have any effect.
- *
  * If this is set to true and a single JPEG frame is added, it will be
  * possible to losslessly reconstruct the JPEG codestream.
+ *
+ * This setting can only be set at the beginning, before encoding starts.
  *
  * @param enc encoder object.
  * @param store_jpeg_metadata true if the encoder should store JPEG metadata.
@@ -322,22 +376,33 @@ JXL_EXPORT JxlEncoderStatus JxlEncoderSetBasicInfo(JxlEncoder* enc,
 JXL_EXPORT JxlEncoderStatus
 JxlEncoderStoreJPEGMetadata(JxlEncoder* enc, JXL_BOOL store_jpeg_metadata);
 
-/**
- * Configure the encoder to use the JPEG XL container format.
+/** Sets the feature level of the JPEG XL codestream. Valid values are 5 and
+ * 10.
  *
- * Using the JPEG XL container format allows to store metadata such as JPEG
- * reconstruction (@ref JxlEncoderStoreJPEGMetadata) or other metadata like
- * EXIF; but it adds a few bytes to the encoded file for container headers even
- * if there is no extra metadata.
+ * Level 5: for end-user image delivery, this level is the most widely
+ * supported level by image decoders and the recommended level to use unless a
+ * level 10 feature is absolutely necessary. Supports a maximum resolution
+ * 268435456 pixels total with a maximum width or height of 262144 pixels,
+ * maximum 16-bit color channel depth, maximum 120 frames per second for
+ * animation, maximum ICC color profile size of 4 MiB, it allows all color
+ * models and extra channel types except CMYK and the JXL_CHANNEL_BLACK extra
+ * channel, and a maximum of 4 extra channels in addition to the 3 color
+ * channels. It also sets boundaries to certain internally used coding tools.
  *
- * @param enc encoder object.
- * @param use_container true if the encoder should output the JPEG XL container
- * format.
- * @return JXL_ENC_SUCCESS if the operation was successful, JXL_ENC_ERROR
- * otherwise.
+ * Level 10: this level removes or increases the bounds of most of the level
+ * 5 limitations, allows CMYK color and up to 32 bits per color channel, but
+ * may be less widely supported.
+ *
+ * The default value is 5. To use level 10 features, the setting must be
+ * explicitely set to 10, the encoder will not automatically enable it. If
+ * incompatible parameters such as too high image resolution for the current
+ * level are set, the encoder will return an error. For internal coding tools,
+ * the encoder will only use those compatible with the level setting.
+ *
+ * This setting can only be set at the beginning, before encoding starts.
  */
-JXL_EXPORT JxlEncoderStatus JxlEncoderUseContainer(JxlEncoder* enc,
-                                                   JXL_BOOL use_container);
+JXL_EXPORT JxlEncoderStatus JxlEncoderSetCodestreamLevel(JxlEncoder* enc,
+                                                         int level);
 
 /**
  * Sets lossless/lossy mode for the provided options. Default is lossy.
@@ -351,31 +416,29 @@ JXL_EXPORT JxlEncoderStatus
 JxlEncoderOptionsSetLossless(JxlEncoderOptions* options, JXL_BOOL lossless);
 
 /**
- * Set the decoding speed tier for the provided options. Minimum is 0 (highest
- * quality), and maximum is 4 (lowest quality). Default is 0.
+ * @param options set of encoder options to update with the new mode.
+ * @param effort the effort value to set.
+ * @return JXL_ENC_SUCCESS if the operation was successful, JXL_ENC_ERROR
+ * otherwise.
  *
+ * DEPRECATED: use JxlEncoderOptionsSetInteger(options, JXL_ENC_OPTION_EFFORT,
+ * effort)) instead.
+ */
+JXL_EXPORT JXL_DEPRECATED JxlEncoderStatus
+JxlEncoderOptionsSetEffort(JxlEncoderOptions* options, int effort);
+
+/**
  * @param options set of encoder options to update with the new decoding speed
  * tier.
  * @param tier the decoding speed tier to set.
  * @return JXL_ENC_SUCCESS if the operation was successful, JXL_ENC_ERROR
  * otherwise.
- */
-JXL_EXPORT JxlEncoderStatus
-JxlEncoderOptionsSetDecodingSpeed(JxlEncoderOptions* options, int tier);
-
-/**
- * Sets encoder effort/speed level without affecting decoding speed. Valid
- * values are, from faster to slower speed: 1:lightning 2:thunder 3:falcon
- * 4:cheetah 5:hare 6:wombat 7:squirrel 8:kitten 9:tortoise.
- * Default: squirrel (7).
  *
- * @param options set of encoder options to update with the new mode.
- * @param effort the effort value to set.
- * @return JXL_ENC_SUCCESS if the operation was successful, JXL_ENC_ERROR
- * otherwise.
+ * DEPRECATED: use JxlEncoderOptionsSetInteger(options,
+ * JXL_ENC_OPTION_DECODING_SPEED, tier)) instead.
  */
-JXL_EXPORT JxlEncoderStatus
-JxlEncoderOptionsSetEffort(JxlEncoderOptions* options, int effort);
+JXL_EXPORT JXL_DEPRECATED JxlEncoderStatus
+JxlEncoderOptionsSetDecodingSpeed(JxlEncoderOptions* options, int tier);
 
 /**
  * Sets the distance level for lossy compression: target max butteraugli
@@ -395,25 +458,6 @@ JxlEncoderOptionsSetEffort(JxlEncoderOptions* options, int effort);
  */
 JXL_EXPORT JxlEncoderStatus
 JxlEncoderOptionsSetDistance(JxlEncoderOptions* options, float distance);
-
-/**
- * Sets an option of integer type to the encoder option. The JxlEncoderOptionId
- * argument determines which option is set.
- *
- * TODO(lode): also use the option enum for the container, lossless, speed,
- * effort and distance options.
- *
- * @param options set of encoder options to update with the new mode.
- * @param option ID of the option to set.
- * @param value Integer value to set for this option.
- * @return JXL_ENC_SUCCESS if the operation was successful, JXL_ENC_ERROR in
- * case of an error, such as invalid or unknown option id, or invalid integer
- * value for the given option. If an error is returned, the state of the
- * JxlEncoderOptions object is still valid and is the same as before this
- * function was called.
- */
-JXL_EXPORT JxlEncoderStatus JxlEncoderOptionsSetAsInteger(
-    JxlEncoderOptions* options, JxlEncoderOptionId option, int32_t value);
 
 /**
  * Create a new set of encoder options, with all values initially copied from
