@@ -5,6 +5,8 @@
 
 #include "lib/extras/codec_apng.h"
 
+#if JPEGXL_ENABLE_APNG
+
 // Parts of this code are taken from apngdis, which has the following license:
 /* APNG Disassembler 2.8
  *
@@ -408,3 +410,5 @@ Status DecodeImageAPNG(const Span<const uint8_t> bytes,
 
 }  // namespace extras
 }  // namespace jxl
+
+#endif

@@ -5,6 +5,8 @@
 
 #include "lib/extras/codec_gif.h"
 
+#if JPEGXL_ENABLE_GIF
+
 #include <gif_lib.h>
 #include <string.h>
 
@@ -350,3 +352,5 @@ Status DecodeImageGIF(Span<const uint8_t> bytes, const ColorHints& color_hints,
 
 }  // namespace extras
 }  // namespace jxl
+
+#endif

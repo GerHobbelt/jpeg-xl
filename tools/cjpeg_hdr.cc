@@ -29,6 +29,9 @@
 #include "lib/jxl/jpeg/jpeg_data.h"
 #include "lib/jxl/quant_weights.h"
 
+#include "monolithic_examples.h"
+
+
 HWY_BEFORE_NAMESPACE();
 namespace jpegxl {
 namespace tools {
@@ -300,7 +303,17 @@ int HBDJPEGMain(int argc, const char* argv[]) {
 }  // namespace tools
 }  // namespace jpegxl
 
+
+#if defined(BUILD_MONOLITHIC)
+#define main(cnt, arr) jpegXL_cjpeg_hdr_main(cnt, arr)
+#endif
+
+/*
+ * The main program.
+ */
+
 int main(int argc, const char** argv) {
   return jpegxl::tools::HBDJPEGMain(argc, argv);
 }
+
 #endif
