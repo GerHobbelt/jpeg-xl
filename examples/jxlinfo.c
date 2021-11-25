@@ -69,6 +69,7 @@ int PrintBasicInfo(FILE* file) {
       }
       data_size = remaining + read_size;
       JxlDecoderSetInput(dec, data, data_size);
+      if (feof(file)) JxlDecoderCloseInput(dec);
     } else if (status == JXL_DEC_SUCCESS) {
       // Finished all processing.
       break;
@@ -331,9 +332,11 @@ int main(int argc, const char** argv) {
   }
 
   if (!PrintBasicInfo(file)) {
+    fclose(file);
     fprintf(stderr, "Couldn't print basic info\n");
     return 1;
   }
 
+  fclose(file);
   return 0;
 }
