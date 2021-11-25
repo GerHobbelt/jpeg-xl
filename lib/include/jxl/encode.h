@@ -209,13 +209,13 @@ typedef enum {
    * percentage of range. Use 0-100 to set an explicit percentage, -1 to use the
    * encoder default. Used for modular encoding.
    */
-  JXL_ENC_OPTION_CHANNEL_COLORS_PRE_TRANSFORM_PERCENT = 20,
+  JXL_ENC_OPTION_CHANNEL_COLORS_GLOBAL_PERCENT = 20,
 
-  /** Use Local channel palette if the amount of colors is smaller than this
-   * percentage of range. Use 0-100 to set an explicit percentage, -1 to use the
-   * encoder default. Used for modular encoding.
+  /** Use Local (per-group) channel palette if the amount of colors is smaller
+   * than this percentage of range. Use 0-100 to set an explicit percentage, -1
+   * to use the encoder default. Used for modular encoding.
    */
-  JXL_ENC_OPTION_CHANNEL_COLORS_PERCENT = 21,
+  JXL_ENC_OPTION_CHANNEL_COLORS_GROUP_PERCENT = 21,
 
   /** Use color palette if amount of colors is smaller than or equal to this
    * amount, or -1 to use the encoder default. Used for modular encoding.
@@ -250,6 +250,25 @@ typedef enum {
    * 5 and 6, 15=mix everything.
    */
   JXL_ENC_OPTION_MODULAR_PREDICTOR = 27,
+
+  /** Fraction of pixels used to learn MA trees as a percentage. -1 = default,
+   * 0 = no MA and fast decode, 50 = default value, 100 = all, values above
+   * 100 are also permitted. Higher values use more encoder memory.
+   */
+  JXL_ENC_OPTION_MODULAR_MA_TREE_LEARNING_PERCENT = 28,
+
+  /** Number of extra (previous-channel) MA tree properties to use. -1 =
+   * default, 0-11 = valid values. Recommended values are in the range 0 to 3,
+   * or 0 to amount of channels minus 1 (including all extra channels, and
+   * excluding color channels when using VarDCT mode). Higher value gives slower
+   * encoding and slower decoding.
+   */
+  JXL_ENC_OPTION_MODULAR_NB_PREV_CHANNELS = 29,
+
+  /** Enable or disable CFL (chroma-from-luma) for lossless JPEG recompression.
+   * -1 = default, 0 = disable CFL, 1 = enable CFL.
+   */
+  JXL_ENC_OPTION_JPEG_RECON_CFL = 30,
 
   /** Enum value not to be used as an option. This value is added to force the
    * C compiler to have the enum to take a known size.
@@ -356,10 +375,21 @@ JXL_EXPORT JxlEncoderStatus JxlEncoderAddJPEGFrame(
  * JxlEncoderSetBasicInfo before JxlEncoderAddImageFrame.
  *
  * Currently only some data types for pixel formats are supported:
- * - JXL_TYPE_UINT8
- * - JXL_TYPE_UINT16
+ * - JXL_TYPE_UINT8, with range 0..255
+ * - JXL_TYPE_UINT16, with range 0..65535
  * - JXL_TYPE_FLOAT16, with nominal range 0..1
  * - JXL_TYPE_FLOAT, with nominal range 0..1
+ *
+ * Note: the sample data type in pixel_format is allowed to be different from
+ * what is described in the JxlBasicInfo. The type in pixel_format describes the
+ * format of the uncompressed pixel buffer. The bits_per_sample and
+ * exponent_bits_per_sample in the JxlBasicInfo describes what will actually be
+ * encoded in the JPEG XL codestream. For example, to encode a 12-bit image, you
+ * would set bits_per_sample to 12, and you could use e.g. JXL_TYPE_UINT16
+ * (where the values are rescaled to 16-bit, i.e. multiplied by 65535/4095) or
+ * JXL_TYPE_FLOAT (where the values are rescaled to 0..1, i.e. multiplied
+ * by 1.f/4095.f). While it is allowed, it is obviously not recommended to use a
+ * pixel_format with lower precision than what is specified in the JxlBasicInfo.
  *
  * We support interleaved channels as described by the JxlPixelFormat:
  * - single-channel data, e.g. grayscale
@@ -376,6 +406,10 @@ JXL_EXPORT JxlEncoderStatus JxlEncoderAddJPEGFrame(
  * JxlEncoderSetICCProfile. If false, the pixels are assumed to be nonlinear
  * sRGB for integer data types (JXL_TYPE_UINT8, JXL_TYPE_UINT16), and linear
  * sRGB for floating point data types (JXL_TYPE_FLOAT16, JXL_TYPE_FLOAT).
+ * Sample values in floating-point pixel formats are allowed to be outside the
+ * nominal range, e.g. to represent out-of-sRGB-gamut colors in the
+ * uses_original_profile=false case. They are however not allowed to be NaN or
+ * +-infinity.
  *
  * @param options set of encoder options to use when encoding the frame.
  * @param pixel_format format for pixels. Object owned by the caller and its
