@@ -396,7 +396,7 @@ JXL_EXPORT JxlEncoderStatus JxlEncoderSetExtraChannelBuffer(
     const void* buffer, size_t size, uint32_t index);
 
 /** Adds a metadata box to the file format. JxlEncoderProcessOutput must be used
- * to effectively write the box to the output. @ref JxlEncoderUseContainer must
+ * to effectively write the box to the output. @ref JxlEncoderUseBoxes must
  * be enabled before using this function.
  *
  * Background information about the container format and boxes follows here:
@@ -491,7 +491,7 @@ JXL_EXPORT JxlEncoderStatus JxlEncoderSetExtraChannelBuffer(
  * For now metadata boxes can only be added before or after the codestream with
  * all frames, so using JxlEncoderAddBox is only possible before the first
  * JxlEncoderAddImageFrame call, and/or after the last JxlEncoderAddImageFrame
- * call and JxlEncoderCloseInput. Support for adding boxes in-between the
+ * call and JxlEncoderCloseFrames. Support for adding boxes in-between the
  * codestream, and/or in-between image frames may be added later, and would
  * cause the encoder to use jxlp boxes for the codestream.
  *
@@ -515,12 +515,50 @@ JXL_EXPORT JxlEncoderStatus JxlEncoderAddBox(JxlEncoder* enc, JxlBoxType type,
                                              JXL_BOOL compress_box);
 
 /**
+ * Indicates the intention to add metadata boxes. This allows @ref
+ * JxlEncoderAddBox to be used. When using this function, then it is required
+ * to use @ref JxlEncoderCloseBoxes at the end.
+ *
+ * By default the encoder assumes no metadata boxes will be added.
+ *
+ * This setting can only be set at the beginning, before encoding starts.
+ *
+ * @param enc encoder object.
+ */
+JXL_EXPORT JxlEncoderStatus JxlEncoderUseBoxes(JxlEncoder* enc);
+
+/**
+ * Declares that no further boxes will be added with @ref JxlEncoderAddBox.
+ * This function must be called after the last box is added so the encoder knows
+ * the stream will be finished. It is not necessary to use this function if
+ * @ref JxlEncoderUseBoxes is not used.
+ *
+ * NOTE: if you don't need to close frames and boxes at separate times, you can
+ * use @ref JxlEncoderCloseInput instead to close both at once.
+ *
+ * @param enc encoder object.
+ */
+JXL_EXPORT JxlEncoderStatus JxlEncoderCloseBoxes(JxlEncoder* enc);
+
+/**
  * Declares that this encoder will not encode any further frames. Further
  * metadata boxes may still be added.
  *
- * Must be called between JxlEncoderAddImageFrame/JPEGFrame of the last frame
- * and the next call to JxlEncoderProcessOutput, or JxlEncoderProcessOutput
- * won't output the last frame correctly.
+ * NOTE: if you don't need to close frames and boxes at separate times, you can
+ * use @ref JxlEncoderCloseInput instead to close both at once.
+ *
+ * @param enc encoder object.
+ */
+JXL_EXPORT void JxlEncoderCloseFrames(JxlEncoder* enc);
+
+/**
+ * Closes any input to the encoder, equivalent to calling JxlEncoderCloseFrames
+ * as well as calling JxlEncoderCloseBoxes if needed. No further input of any
+ * kind may be given to the encoder, but further @ref JxlEncoderProcessOutput
+ * calls should be done to create the final output.
+ *
+ * The requirements of both @ref JxlEncoderCloseFrames and @ref
+ * JxlEncoderCloseBoxes apply to this function.
  *
  * @param enc encoder object.
  */
@@ -643,16 +681,13 @@ JXL_EXPORT JxlEncoderStatus JxlEncoderSetExtraChannelName(JxlEncoder* enc,
 JXL_EXPORT JxlEncoderStatus JxlEncoderOptionsSetInteger(
     JxlEncoderOptions* options, JxlEncoderOptionId option, int32_t value);
 
-/** Indicates the encoder should use the box-based JPEG XL container format
- * (BMFF) instead of outputting the codestream bytes directly. Both with and
- * without container are valid JPEG XL files, but the container is necessary
- * when metadata, level 10 features or JPEG reconstruction is used.
+/** Forces the encoder to use the box-based container format (BMFF) even
+ * when not necessary.
  *
- * If enabled, the encoder always uses the container format, even if not
- * necessary. If disabled, the encoder will still use the container format if
- * required (such as for JPEG metadata @ref JxlEncoderStoreJPEGMetadata).
- *
- * This setting must be explicitely enabled before using @ref JxlEncoderAddBox.
+ * When using @ref JxlEncoderUseBoxes, @ref JxlEncoderStoreJPEGMetadata or @ref
+ * JxlEncoderSetCodestreamLevel with level 10, the encoder will automatically
+ * also use the container format, it is not necessary to use
+ * JxlEncoderUseContainer for those use cases.
  *
  * By default this setting is disabled.
  *
@@ -660,7 +695,7 @@ JXL_EXPORT JxlEncoderStatus JxlEncoderOptionsSetInteger(
  *
  * @param enc encoder object.
  * @param use_container true if the encoder should always output the JPEG XL
- * container format.
+ * container format, false to only output it when necessary.
  * @return JXL_ENC_SUCCESS if the operation was successful, JXL_ENC_ERROR
  * otherwise.
  */
