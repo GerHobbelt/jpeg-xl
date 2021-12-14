@@ -32,6 +32,7 @@
 #include "lib/jxl/codec_in_out.h"
 #include "lib/jxl/common.h"
 #include "lib/jxl/enc_cache.h"
+#include "lib/jxl/enc_color_management.h"
 #include "lib/jxl/enc_file.h"
 #include "lib/jxl/enc_params.h"
 #include "lib/jxl/frame_header.h"
@@ -271,20 +272,20 @@ void PrintMode(jxl::ThreadPoolInternal* pool, const jxl::CodecInOut& io,
 void CompressArgs::AddCommandLineOptions(CommandLineParser* cmdline) {
   // Positional arguments.
   cmdline->AddPositionalOption("INPUT", /* required = */ true,
-                               "the input can be PNG"
+                               "the input can be "
 #if JPEGXL_ENABLE_APNG
-                               ", APNG"
+                               "PNG, APNG, "
 #endif
 #if JPEGXL_ENABLE_GIF
-                               ", GIF"
+                               "GIF, "
 #endif
 #if JPEGXL_ENABLE_JPEG
-                               ", JPEG"
+                               "JPEG, "
 #endif
 #if JPEGXL_ENABLE_EXR
-                               ", EXR"
+                               "EXR, "
 #endif
-                               ", PPM, PFM, or PGX",
+                               "PPM, PFM, or PGX",
                                &file_in);
   cmdline->AddPositionalOption(
       "OUTPUT", /* required = */ true,
@@ -732,7 +733,6 @@ jxl::Status LoadAll(CompressArgs& args, jxl::ThreadPoolInternal* pool,
                     jxl::CodecInOut* io, double* decode_mps) {
   const double t0 = jxl::Now();
 
-  io->target_nits = args.intensity_target;
   io->dec_target = (args.jpeg_transcode ? jxl::DecodeTarget::kQuantizedCoeffs
                                         : jxl::DecodeTarget::kPixels);
   jxl::Codec input_codec;
@@ -740,6 +740,9 @@ jxl::Status LoadAll(CompressArgs& args, jxl::ThreadPoolInternal* pool,
                    &input_codec)) {
     fprintf(stderr, "Failed to read image %s.\n", args.params.file_in);
     return false;
+  }
+  if (args.intensity_target != 0) {
+    io->metadata.m.SetIntensityTarget(args.intensity_target);
   }
   if (input_codec != jxl::Codec::kJPG) args.jpeg_transcode = false;
   if (args.jpeg_transcode) args.params.butteraugli_distance = 0;
@@ -812,7 +815,7 @@ jxl::Status CompressJxl(jxl::CodecInOut& io, double decode_mps,
       args.params.color_transform = io.Main().color_transform;
     }
     ok = EncodeFile(args.params, &io, &passes_encoder_state, compressed,
-                    &aux_out, pool);
+                    jxl::GetJxlCms(), &aux_out, pool);
     if (!ok) {
       fprintf(stderr, "Failed to compress to %s.\n", ModeFromArgs(args));
       return false;

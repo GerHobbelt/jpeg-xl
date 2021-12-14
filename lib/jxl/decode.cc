@@ -29,7 +29,6 @@
 
 namespace {
 
-
 // Checks if a + b > size, taking possible integer overflow into account.
 bool OutOfBounds(size_t a, size_t b, size_t size) {
   size_t pos = a + b;
@@ -735,7 +734,7 @@ JxlDecoder* JxlDecoderCreate(const JxlMemoryManager* memory_manager) {
   JxlDecoder* dec = new (alloc) JxlDecoder();
   dec->memory_manager = local_memory_manager;
 
-#if (JXL_MEMORY_SANITIZER || JXL_ADDRESS_SANITIZER || JXL_THREAD_SANITIZER)
+#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
   if (!memory_manager) {
     dec->memory_limit_base = 1 << 21;
     // Allow 5 x max_image_size processing units; every frame is accounted
@@ -1371,9 +1370,13 @@ JxlDecoderStatus JxlDecoderProcessCodestream(JxlDecoder* dec, const uint8_t* in,
       }
 
       dec->frame_dec.reset(new FrameDecoder(
-          dec->passes_state.get(), dec->metadata, dec->thread_pool.get()));
+          dec->passes_state.get(), dec->metadata, dec->thread_pool.get(),
+          /*use_slow_rendering_pipeline=*/false));
       dec->frame_dec->SetRenderSpotcolors(dec->render_spotcolors);
       dec->frame_dec->SetCoalescing(dec->coalescing);
+      if (dec->events_wanted & JXL_DEC_FRAME_PROGRESSION) {
+        dec->frame_dec->SetPauseAtProgressive();
+      }
 
       // If JPEG reconstruction is wanted and possible, set the jpeg_data of
       // the ImageBundle.
@@ -1483,8 +1486,17 @@ JxlDecoderStatus JxlDecoderProcessCodestream(JxlDecoder* dec, const uint8_t* in,
       // TODO(lode): allow next_in to move forward if sections from the
       // beginning of the stream have been processed
 
-      if (status.code() == StatusCode::kNotEnoughBytes ||
-          dec->sections->section_info.size() < dec->frame_dec->NumSections()) {
+      bool all_sections_done = !!status && dec->frame_dec->HasDecodedAll();
+
+      bool got_dc_only =
+          !!status && !all_sections_done && dec->frame_dec->HasDecodedDC();
+
+      if ((dec->events_wanted & JXL_DEC_FRAME_PROGRESSION) && got_dc_only) {
+        dec->events_wanted &= ~JXL_DEC_FRAME_PROGRESSION;
+        return JXL_DEC_FRAME_PROGRESSION;
+      }
+
+      if (!all_sections_done) {
         // Not all sections have been processed yet
         return JXL_DEC_NEED_MORE_INPUT;
       }
@@ -1519,7 +1531,8 @@ JxlDecoderStatus JxlDecoderProcessCodestream(JxlDecoder* dec, const uint8_t* in,
         // Frame finished, restore the events_wanted with the per-frame events
         // from orig_events_wanted, in case there is a next frame.
         dec->events_wanted |=
-            (dec->orig_events_wanted & (JXL_DEC_FULL_IMAGE | JXL_DEC_FRAME));
+            (dec->orig_events_wanted &
+             (JXL_DEC_FULL_IMAGE | JXL_DEC_FRAME | JXL_DEC_FRAME_PROGRESSION));
 
         // If no output buffer was set, we merely return the JXL_DEC_FULL_IMAGE
         // status without outputting pixels.
@@ -2153,7 +2166,6 @@ JxlDecoderStatus JxlDecoderGetBasicInfo(const JxlDecoder* dec,
 
     info->have_preview = meta.have_preview;
     info->have_animation = meta.have_animation;
-    // TODO(janwas): intrinsic_size
     info->orientation = static_cast<JxlOrientation>(meta.orientation);
 
     if (!dec->keep_orientation) {
@@ -2195,6 +2207,14 @@ JxlDecoderStatus JxlDecoderGetBasicInfo(const JxlDecoder* dec,
           dec->metadata.m.animation.tps_denominator;
       info->animation.num_loops = dec->metadata.m.animation.num_loops;
       info->animation.have_timecodes = dec->metadata.m.animation.have_timecodes;
+    }
+
+    if (meta.have_intrinsic_size) {
+      info->intrinsic_xsize = dec->metadata.m.intrinsic_size.xsize();
+      info->intrinsic_ysize = dec->metadata.m.intrinsic_size.ysize();
+    } else {
+      info->intrinsic_xsize = info->xsize;
+      info->intrinsic_ysize = info->ysize;
     }
   }
 
