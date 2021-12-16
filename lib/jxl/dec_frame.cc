@@ -1085,7 +1085,7 @@ int FrameDecoder::SavedAs(const FrameHeader& header) {
 bool FrameDecoder::HasEverything() const {
   if (!decoded_dc_global_) return false;
   if (!decoded_ac_global_) return false;
-  for (auto& have_dc_group : decoded_dc_groups_) {
+  for (auto have_dc_group : decoded_dc_groups_) {
     if (!have_dc_group) return false;
   }
   for (auto& nb_passes : decoded_passes_per_ac_group_) {
