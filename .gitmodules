@@ -1,15 +1,15 @@
 [submodule "third_party/brotli"]
 	path = third_party/brotli
-	url = https://github.com/GerHobbelt/brotli
+	url = git@github.com:GerHobbelt/brotli
 [submodule "third_party/lodepng"]
 	path = third_party/lodepng
-	url = https://github.com/GerHobbelt/lodepng
+	url = git@github.com:GerHobbelt/lodepng
 [submodule "third_party/lcms"]
 	path = third_party/lcms
-	url = https://github.com/GerHobbelt/thirdparty-lcms2
+	url = git@github.com:GerHobbelt/thirdparty-lcms2
 [submodule "third_party/googletest"]
 	path = third_party/googletest
-	url = https://github.com/GerHobbelt/googletest
+	url = git@github.com:GerHobbelt/googletest
 [submodule "third_party/sjpeg"]
 	path = third_party/sjpeg
 	url = https://github.com/webmproject/sjpeg.git
