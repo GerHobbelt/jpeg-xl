@@ -390,7 +390,6 @@ Status DecodeImageAPNG(const Span<const uint8_t> bytes,
   PaddedBytes chunkIHDR;
   std::vector<PaddedBytes> chunksInfo;
   bool isAnimated = false;
-  bool skipFirst = false;
   bool hasInfo = false;
   APNGFrame frameRaw = {};
   uint32_t num_channels;
@@ -452,7 +451,6 @@ Status DecodeImageAPNG(const Span<const uint8_t> bytes,
 
         if (id == kId_acTL && !hasInfo && !isAnimated) {
           isAnimated = true;
-          skipFirst = true;
           ppf->info.have_animation = true;
           ppf->info.animation.tps_numerator = 1000;
           ppf->info.animation.tps_denominator = 1;
@@ -502,13 +500,6 @@ Status DecodeImageAPNG(const Span<const uint8_t> bytes,
                                  chunkIHDR, chunksInfo)) {
               break;
             }
-
-          } else
-            skipFirst = false;
-
-          if (ppf->frames.size() == (skipFirst ? 1 : 0)) {
-            bop = 0;
-            if (dop == 2) dop = 1;
           }
         } else if (id == kId_IDAT) {
           // First IDAT chunk means we now have all header info
