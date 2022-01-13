@@ -5,6 +5,8 @@
 
 #include "lib/extras/dec/jpg.h"
 
+#if JPEGXL_ENABLE_JPEG
+
 #include <jpeglib.h>
 #include <setjmp.h>
 #include <stdint.h>
@@ -286,3 +288,5 @@ Status DecodeImageJPG(const Span<const uint8_t> bytes,
 
 }  // namespace extras
 }  // namespace jxl
+
+#endif
