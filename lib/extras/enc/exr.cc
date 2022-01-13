@@ -5,6 +5,8 @@
 
 #include "lib/extras/enc/exr.h"
 
+#if JPEGXL_ENABLE_EXR
+
 #include <ImfChromaticitiesAttribute.h>
 #include <ImfIO.h>
 #include <ImfRgbaFile.h>
@@ -165,3 +167,5 @@ Status EncodeImageEXR(const CodecInOut* io, const ColorEncoding& c_desired,
 
 }  // namespace extras
 }  // namespace jxl
+
+#endif

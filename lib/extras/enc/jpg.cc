@@ -5,6 +5,8 @@
 
 #include "lib/extras/enc/jpg.h"
 
+#if JPEGXL_ENABLE_JPEG
+
 #include <jpeglib.h>
 #include <setjmp.h>
 #include <stdint.h>
@@ -500,3 +502,5 @@ Status EncodeImageJPG(const CodecInOut* io, JpegEncoder encoder, size_t quality,
 
 }  // namespace extras
 }  // namespace jxl
+
+#endif
