@@ -15,6 +15,14 @@
 #include <intrin.h>  // _byteswap_*
 #endif
 
+#if defined(_WIN32) && !defined(__BYTE_ORDER__)
+#  if defined(_M_IX86) || defined(_M_AMD64) || defined(_M_IA64) || defined (_M_ARM) || defined (_M_ARM64)
+#    define __ORDER_LITTLE_ENDIAN__ 1234
+#    define __ORDER_BIG_ENDIAN__    4321
+#    define __BYTE_ORDER__ __ORDER_LITTLE_ENDIAN__
+#  endif
+#endif
+
 #if (defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__))
 #define JXL_BYTE_ORDER_LITTLE 1
 #else

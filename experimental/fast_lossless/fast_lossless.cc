@@ -4,6 +4,7 @@
 // license that can be found in the LICENSE file.
 
 #include "fast_lossless.h"
+#include "lib/jxl/base/byte_order.h"
 
 #include <assert.h>
 #include <stdint.h>
