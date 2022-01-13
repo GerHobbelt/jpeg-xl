@@ -19,6 +19,8 @@
 #include "jxl/resizable_parallel_runner.h"
 #include "jxl/resizable_parallel_runner_cxx.h"
 
+#include "monolithic_examples.h"
+
 bool WritePAM(const char* filename, const uint8_t* buffer, size_t w, size_t h) {
   FILE* fp = fopen(filename, "wb");
   if (!fp) {
@@ -196,7 +198,13 @@ bool LoadFile(const char* filename, std::vector<uint8_t>* out) {
   return readsize == static_cast<size_t>(size);
 }
 
-int main(int argc, char* argv[]) {
+
+
+#if defined(BUILD_MONOLITHIC)
+#define main(cnt, arr) jpegXL_decode_progressive_main(cnt, arr)
+#endif
+
+int main(int argc, const char** argv) {
   if (argc < 3) {
     fprintf(
         stderr,

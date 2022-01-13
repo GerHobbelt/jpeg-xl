@@ -11,9 +11,16 @@
 #include <thread>
 
 #include "fast_lossless.h"
-#include "lodepng.h"
 
-int main(int argc, char** argv) {
+#include "monolithic_examples.h"
+
+
+
+#if defined(BUILD_MONOLITHIC)
+#define main(cnt, arr) jpegXL_fast_lossless_main(cnt, arr)
+#endif
+
+int main(int argc, const char** argv) {
   if (argc < 3) {
     fprintf(stderr, "Usage: %s in.png out.jxl [num_reps]\n", argv[0]);
     return 1;

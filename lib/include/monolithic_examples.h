@@ -21,6 +21,7 @@ extern int jpegXL_epf_main(int argc, const char** argv);
 extern int jpegXL_from_tree_main(int argc, const char** argv);
 extern int jpegXL_info_main(int argc, const char** argv);
 extern int jpegXL_decode_EXIF_metadata_main(int argc, const char** argv);
+extern int jpegXL_decode_progressive_main(int argc, const char** argv);
 extern int jpegXL_ssimulacra_main(int argc, const char** argv);
 extern int jpegXL_ssimulacra_openCV_main(int argc, const char** argv);
 extern int jpegXL_xyb_range_main(int argc, const char** argv);
