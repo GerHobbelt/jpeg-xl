@@ -27,7 +27,7 @@
 
 int mkdir(const char* path, mode_t /*mode*/) {
   const LPSECURITY_ATTRIBUTES sec = nullptr;
-  if (!CreateDirectory(path, sec)) {
+  if (!CreateDirectoryA(path, sec)) {
     JXL_NOTIFY_ERROR("Failed to create directory %s", path);
     return -1;
   }
@@ -61,7 +61,7 @@ int mkdir(const char* path, mode_t /*mode*/) {
 struct DIR {
   HANDLE hFind;
 
-  WIN32_FIND_DATA findData;  // indeterminate if hFind == INVALID_HANDLE_VALUE
+  WIN32_FIND_DATAA findData;  // indeterminate if hFind == INVALID_HANDLE_VALUE
 
   // readdir will return the address of this member.
   // (must be stored in DIR to allow multiple independent
@@ -73,7 +73,7 @@ struct DIR {
 };
 
 static bool IsValidDirectory(const char* path) {
-  const DWORD fileAttributes = GetFileAttributes(path);
+  const DWORD fileAttributes = GetFileAttributesA(path);
 
   // path not found
   if (fileAttributes == INVALID_FILE_ATTRIBUTES) return false;
@@ -102,7 +102,7 @@ DIR* opendir(const char* path) {
 
   // (we don't defer FindFirstFile until readdir because callers
   // expect us to return 0 if directory reading will/did fail.)
-  d->hFind = FindFirstFile(searchPath.c_str(), &d->findData);
+  d->hFind = FindFirstFileA(searchPath.c_str(), &d->findData);
   if (d->hFind != INVALID_HANDLE_VALUE) return d.release();
   if (GetLastError() == ERROR_NO_MORE_FILES) return d.release();  // empty
 
@@ -123,7 +123,7 @@ dirent* readdir(DIR* d) {
   for (;;) {
     if (d->numCalls++ != 0)  // (skip first call to FindNextFile - see opendir)
     {
-      if (!FindNextFile(d->hFind, &d->findData)) {
+      if (!FindNextFileA(d->hFind, &d->findData)) {
         JXL_ASSERT(GetLastError() == ERROR_NO_MORE_FILES);
         SetLastError(0);
         return nullptr;  // end of directory or error
