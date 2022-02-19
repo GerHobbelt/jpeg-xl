@@ -11,6 +11,7 @@
 #include <thread>
 
 #include "fast_lossless.h"
+#include "pam-input.h"
 
 #include "monolithic_examples.h"
 
@@ -29,7 +30,7 @@ int main(int argc, const char** argv) {
   const char* in = argv[1];
   const char* out = argv[2];
   int effort = argc >= 4 ? atoi(argv[3]) : 2;
-  size_t num_reps = argc >= 5 ? atoi(argv[4]) : 0;
+  size_t num_reps = argc >= 5 ? atoi(argv[4]) : 1;
 
   if (effort < 0 || effort > 127) {
     fprintf(
@@ -39,26 +40,29 @@ int main(int argc, const char** argv) {
   }
 
   unsigned char* png;
-  unsigned width, height;
+  unsigned w, h;
+  size_t nb_chans = 4, bitdepth = 8;
 
-  unsigned error = lodepng_decode32_file(&png, &width, &height, in);
+  unsigned error = lodepng_decode32_file(&png, &w, &h, in);
 
-  if (error) {
+  size_t width = w, height = h;
+  if (error && !DecodePAM(in, &png, &width, &height, &nb_chans, &bitdepth)) {
     fprintf(stderr, "lodepng error %u: %s\n", error, lodepng_error_text(error));
     return 1;
   }
 
   size_t encoded_size = 0;
   unsigned char* encoded = nullptr;
+  size_t stride = width * nb_chans * (bitdepth > 8 ? 2 : 1);
 
-  if (num_reps > 0) {
-    auto start = std::chrono::high_resolution_clock::now();
-    for (size_t _ = 0; _ < num_reps; _++) {
-      free(encoded);
-      encoded_size =
-          FastLosslessEncode(png, width, width * 4, height, effort, &encoded);
-    }
-    auto stop = std::chrono::high_resolution_clock::now();
+  auto start = std::chrono::high_resolution_clock::now();
+  for (size_t _ = 0; _ < num_reps; _++) {
+    free(encoded);
+    encoded_size = FastLosslessEncode(png, width, stride, height, nb_chans,
+                                      bitdepth, effort, &encoded);
+  }
+  auto stop = std::chrono::high_resolution_clock::now();
+  if (num_reps > 1) {
     float us =
         std::chrono::duration_cast<std::chrono::microseconds>(stop - start)
             .count();
@@ -67,9 +71,6 @@ int main(int argc, const char** argv) {
     fprintf(stderr, "%10.3f MP/s\n", mps);
     fprintf(stderr, "%10.3f bits/pixel\n",
             encoded_size * 8.0 / float(width) / float(height));
-  } else {
-    encoded_size =
-        FastLosslessEncode(png, width, width * 4, height, effort, &encoded);
   }
 
   FILE* o = fopen(out, "wb");
