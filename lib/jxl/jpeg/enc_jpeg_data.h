@@ -12,7 +12,7 @@
 
 namespace jxl {
 namespace jpeg {
-Status EncodeJPEGData(JPEGData& jpeg_data, PaddedBytes* bytes);
+Status EncodeJPEGData(JPEGData& jpeg_data, PaddedBytes* bytes, int effort);
 
 Status SetColorEncodingFromJpegData(const jpeg::JPEGData& jpg,
                                     ColorEncoding* color_encoding);
