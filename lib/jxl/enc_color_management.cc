@@ -895,7 +895,7 @@ Status ColorEncoding::SetFieldsFromICC() {
   rendering_intent = static_cast<RenderingIntent>(rendering_intent32);
 
   SetColorSpace(ColorSpaceFromProfile(profile));
-  if (cmsGetColorSpace(profile.get()) == cmsSigCmykData) {
+  if (cmsGetColorSpace(context, profile.get()) == cmsSigCmykData) {
     cmyk_ = true;
     return true;
   }
@@ -926,7 +926,7 @@ void ColorEncoding::DecideIfWantICC() {
   const cmsContext context = GetContext();
   Profile profile;
   if (!DecodeProfile(context, ICC(), &profile)) return;
-  if (cmsGetColorSpace(profile.get()) == cmsSigCmykData) return;
+  if (cmsGetColorSpace(context, profile.get()) == cmsSigCmykData) return;
   if (!MaybeCreateProfile(*this, &icc_new)) return;
   equivalent = ProfileEquivalentToICC(context, profile, icc_new, *this);
 #endif  // JPEGXL_ENABLE_SKCMS
