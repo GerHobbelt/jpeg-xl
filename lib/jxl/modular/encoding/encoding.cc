@@ -186,18 +186,27 @@ Status DecodeModularChannelMAANS(BitReader *br, ANSSymbolReader *reader,
           pixel_type *JXL_RESTRICT r = channel.Row(y);
           std::fill(r, r + channel.w, v);
         }
-
       } else {
         JXL_DEBUG_V(8, "Fast track.");
-        for (size_t y = 0; y < channel.h; y++) {
-          pixel_type *JXL_RESTRICT r = channel.Row(y);
-          for (size_t x = 0; x < channel.w; x++) {
-            uint32_t v = reader->ReadHybridUintClustered(ctx_id, br);
-            r[x] = make_pixel(v, multiplier, offset);
+        if (multiplier == 1 && offset == 0) {
+          for (size_t y = 0; y < channel.h; y++) {
+            pixel_type *JXL_RESTRICT r = channel.Row(y);
+            for (size_t x = 0; x < channel.w; x++) {
+              uint32_t v = reader->ReadHybridUintClustered(ctx_id, br);
+              r[x] = UnpackSigned(v);
+            }
+          }
+        } else {
+          for (size_t y = 0; y < channel.h; y++) {
+            pixel_type *JXL_RESTRICT r = channel.Row(y);
+            for (size_t x = 0; x < channel.w; x++) {
+              uint32_t v = reader->ReadHybridUintClustered(ctx_id, br);
+              r[x] = make_pixel(v, multiplier, offset);
+            }
           }
         }
       }
-    } else if (predictor == Predictor::Gradient && offset == 0 &&
+    } else if (predictor == Predictor::Gradient && offset == 0 && ctx_id == 1 &&
                multiplier == 1 && reader->HuffRleOnly()) {
       JXL_DEBUG_V(8, "Gradient RLE (fjxl) very fast track.");
       uint32_t run = 0;
@@ -210,19 +219,19 @@ Status DecodeModularChannelMAANS(BitReader *br, ANSSymbolReader *reader,
             (y ? channel.Row(y - 1) - 1 : r - 1);
         pixel_type_w guess = (y ? rtop[0] : 0);
         if (run == 0) {
-          reader->ReadHybridUintClusteredHuffRleOnly(ctx_id, br, &v, &run);
+          reader->ReadHybridUintClusteredHuffRleOnly(br, &v, &run);
           sv = UnpackSigned(v);
         } else {
           run--;
         }
         r[0] = sv + guess;
-        for (size_t x = 1; x < channel.w; x++) {
+        for (size_t x = 1; x != channel.w; x++) {
           pixel_type left = r[x - 1];
           pixel_type top = rtop[x];
           pixel_type topleft = rtopleft[x];
-          pixel_type_w guess = ClampedGradient(top, left, topleft);
+          pixel_type guess = ClampedGradient(top, left, topleft);
           if (!run) {
-            reader->ReadHybridUintClusteredHuffRleOnly(ctx_id, br, &v, &run);
+            reader->ReadHybridUintClusteredHuffRleOnly(br, &v, &run);
             sv = UnpackSigned(v);
           } else {
             run--;
@@ -355,12 +364,36 @@ Status DecodeModularChannelMAANS(BitReader *br, ANSSymbolReader *reader,
       pixel_type *JXL_RESTRICT p = channel.Row(y);
       PrecomputeReferences(channel, y, *image, chan, &references);
       InitPropsRow(&properties, static_props, y);
-      for (size_t x = 0; x < channel.w; x++) {
-        PredictionResult res =
-            PredictTreeNoWP(&properties, channel.w, p + x, onerow, x, y,
-                            tree_lookup, references);
-        uint64_t v = reader->ReadHybridUintClustered(res.context, br);
-        p[x] = make_pixel(v, res.multiplier, res.guess);
+      if (y > 1 && channel.w > 8 && references.w == 0) {
+        for (size_t x = 0; x < 2; x++) {
+          PredictionResult res =
+              PredictTreeNoWP(&properties, channel.w, p + x, onerow, x, y,
+                              tree_lookup, references);
+          uint64_t v = reader->ReadHybridUintClustered(res.context, br);
+          p[x] = make_pixel(v, res.multiplier, res.guess);
+        }
+        for (size_t x = 2; x < channel.w - 2; x++) {
+          PredictionResult res =
+              PredictTreeNoWPNEC(&properties, channel.w, p + x, onerow, x, y,
+                                 tree_lookup, references);
+          uint64_t v = reader->ReadHybridUintClustered(res.context, br);
+          p[x] = make_pixel(v, res.multiplier, res.guess);
+        }
+        for (size_t x = channel.w - 2; x < channel.w; x++) {
+          PredictionResult res =
+              PredictTreeNoWP(&properties, channel.w, p + x, onerow, x, y,
+                              tree_lookup, references);
+          uint64_t v = reader->ReadHybridUintClustered(res.context, br);
+          p[x] = make_pixel(v, res.multiplier, res.guess);
+        }
+      } else {
+        for (size_t x = 0; x < channel.w; x++) {
+          PredictionResult res =
+              PredictTreeNoWP(&properties, channel.w, p + x, onerow, x, y,
+                              tree_lookup, references);
+          uint64_t v = reader->ReadHybridUintClustered(res.context, br);
+          p[x] = make_pixel(v, res.multiplier, res.guess);
+        }
       }
     }
   } else {

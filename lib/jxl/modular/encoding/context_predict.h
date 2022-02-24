@@ -304,7 +304,7 @@ class MATreeLookup {
     int64_t offset;
     int32_t multiplier;
   };
-  LookupResult Lookup(const Properties &properties) const {
+  JXL_INLINE LookupResult Lookup(const Properties &properties) const {
     uint32_t pos = 0;
     while (true) {
       const FlatDecisionNode &node = nodes_[pos];
@@ -334,21 +334,35 @@ constexpr size_t kGradientProp = 9;
 // Clamps gradient to the min/max of n, w (and l, implicitly).
 static JXL_INLINE int32_t ClampedGradient(const int32_t n, const int32_t w,
                                           const int32_t l) {
-  const int32_t m = std::min(n, w);
-  const int32_t M = std::max(n, w);
-  // The end result of this operation doesn't overflow or underflow if the
-  // result is between m and M, but the intermediate value may overflow, so we
-  // do the intermediate operations in uint32_t and check later if we had an
-  // overflow or underflow condition comparing m, M and l directly.
-  // grad = M + m - l = n + w - l
-  const int32_t grad =
-      static_cast<int32_t>(static_cast<uint32_t>(n) + static_cast<uint32_t>(w) -
-                           static_cast<uint32_t>(l));
-  // We use two sets of ternary operators to force the evaluation of them in
-  // any case, allowing the compiler to avoid branches and use cmovl/cmovg in
-  // x86.
-  const int32_t grad_clamp_M = (l < m) ? M : grad;
-  return (l > M) ? m : grad_clamp_M;
+  const int32_t ab =
+      static_cast<int32_t>(static_cast<uint32_t>(w) - static_cast<uint32_t>(n));
+  const int32_t ac =
+      static_cast<int32_t>(static_cast<uint32_t>(w) - static_cast<uint32_t>(l));
+  const int32_t bc =
+      static_cast<int32_t>(static_cast<uint32_t>(n) - static_cast<uint32_t>(l));
+
+  // grad == W + N - NW
+  const int32_t grad = static_cast<int32_t>(static_cast<uint32_t>(ac) +
+                                            static_cast<uint32_t>(n));
+  // d is negative iff (W >= N && N < NW) || (W < N && N >= NW)
+  int32_t d = ab ^ bc;
+  int32_t clamp = d < 0 ? n : w;
+  // if clamping has to be done, then the clamped value will be clamp:
+  //  if grad < min(N,W) == N: W >= N, -grad > -N so NW > W >= N, clamp is N
+  //  if grad < min(N,W) == W < N: -grad > -W so NW > N > W, clamp is W
+  //  if grad > max(N,W) == W: W >= N, -grad < -W so NW < N, clamp is W
+  //  if grad > max(N,W) == N > W: W < N, -grad < -N so NW < W < N, clamp is N
+
+  // s is negative iff (W >= NW && N < NW) || (W < NW && N >= NW)
+  int32_t s = ac ^ bc;
+  int32_t pred = s < 0 ? grad : clamp;
+  // no clamping has to be done
+  //  iff max(N,W) >= grad >= min(N,W)
+  //  iff W+N-min(N,W) >= W+N-NW >= W+N-max(N,W)
+  //  iff -min(N,W) >= NW >= -max(N,W)
+  //  iff min(N,W) <= NW <= max(N,W)
+  //  iff s is negative
+  return pred;
 }
 
 inline pixel_type_w Select(pixel_type_w a, pixel_type_w b, pixel_type_w c) {
@@ -416,6 +430,7 @@ enum PredictorMode {
   kUseWP = 2,
   kForceComputeProperties = 4,
   kAllPredictions = 8,
+  kNoEdgeCases = 16
 };
 
 JXL_INLINE pixel_type_w PredictOne(Predictor p, pixel_type_w left,
@@ -461,7 +476,7 @@ JXL_INLINE pixel_type_w PredictOne(Predictor p, pixel_type_w left,
 }
 
 template <int mode>
-inline PredictionResult Predict(
+JXL_INLINE PredictionResult Predict(
     Properties *p, size_t w, const pixel_type *JXL_RESTRICT pp,
     const intptr_t onerow, const size_t x, const size_t y, Predictor predictor,
     const MATreeLookup *lookup, const Channel *references,
@@ -470,13 +485,15 @@ inline PredictionResult Predict(
   size_t offset = 3;
   constexpr bool compute_properties =
       mode & kUseTree || mode & kForceComputeProperties;
-  pixel_type_w left = (x ? pp[-1] : (y ? pp[-onerow] : 0));
-  pixel_type_w top = (y ? pp[-onerow] : left);
-  pixel_type_w topleft = (x && y ? pp[-1 - onerow] : left);
-  pixel_type_w topright = (x + 1 < w && y ? pp[1 - onerow] : top);
-  pixel_type_w leftleft = (x > 1 ? pp[-2] : left);
-  pixel_type_w toptop = (y > 1 ? pp[-onerow - onerow] : top);
-  pixel_type_w toprightright = (x + 2 < w && y ? pp[2 - onerow] : topright);
+  constexpr bool nec = mode & kNoEdgeCases;
+  pixel_type_w left = (nec || x ? pp[-1] : (y ? pp[-onerow] : 0));
+  pixel_type_w top = (nec || y ? pp[-onerow] : left);
+  pixel_type_w topleft = (nec || (x && y) ? pp[-1 - onerow] : left);
+  pixel_type_w topright = (nec || (x + 1 < w && y) ? pp[1 - onerow] : top);
+  pixel_type_w leftleft = (nec || x > 1 ? pp[-2] : left);
+  pixel_type_w toptop = (nec || y > 1 ? pp[-onerow - onerow] : top);
+  pixel_type_w toprightright =
+      (nec || (x + 2 < w && y) ? pp[2 - onerow] : topright);
 
   if (compute_properties) {
     // location
@@ -506,7 +523,7 @@ inline PredictionResult Predict(
     wp_pred = wp_state->Predict<compute_properties>(
         x, y, w, top, left, topright, topleft, toptop, p, offset);
   }
-  if (compute_properties) {
+  if (!nec && compute_properties) {
     offset += weighted::kNumProperties;
     // Extra properties.
     const pixel_type *JXL_RESTRICT rp = references->Row(x);
@@ -562,6 +579,15 @@ inline PredictionResult PredictTreeNoWP(Properties *p, size_t w,
                                         const MATreeLookup &tree_lookup,
                                         const Channel &references) {
   return detail::Predict<detail::kUseTree>(
+      p, w, pp, onerow, x, y, Predictor::Zero, &tree_lookup, &references,
+      /*wp_state=*/nullptr, /*predictions=*/nullptr);
+}
+// Only use for y > 1, x > 1, x < w-2, and empty references
+JXL_INLINE PredictionResult
+PredictTreeNoWPNEC(Properties *p, size_t w, const pixel_type *JXL_RESTRICT pp,
+                   const intptr_t onerow, const int x, const int y,
+                   const MATreeLookup &tree_lookup, const Channel &references) {
+  return detail::Predict<detail::kUseTree | detail::kNoEdgeCases>(
       p, w, pp, onerow, x, y, Predictor::Zero, &tree_lookup, &references,
       /*wp_state=*/nullptr, /*predictions=*/nullptr);
 }
