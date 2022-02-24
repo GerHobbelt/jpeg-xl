@@ -105,6 +105,8 @@ void ComputeSegments(const Spline::Point& center, const float intensity,
   // Sanity check sigma, inverse sigma and intensity
   if (!(std::isfinite(sigma) && sigma != 0.0f && std::isfinite(1.0f / sigma) &&
         std::isfinite(intensity))) {
+    // Even no-draw should still be accounted.
+    *pixel_limit -= std::min<size_t>(*pixel_limit, 4);
     return;
   }
 #if JXL_HIGH_PRECISION
