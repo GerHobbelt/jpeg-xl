@@ -334,6 +334,11 @@ constexpr size_t kGradientProp = 9;
 // Clamps gradient to the min/max of n, w (and l, implicitly).
 static JXL_INLINE int32_t ClampedGradient(const int32_t n, const int32_t w,
                                           const int32_t l) {
+  // The end result of this operation doesn't overflow or underflow if the
+  // result is between m and M, but the intermediate value may overflow, so we
+  // do the intermediate operations in uint32_t and check later if we had an
+  // overflow or underflow condition comparing m, M and l directly.
+  // grad = M + m - l = n + w - l
   const int32_t ab =
       static_cast<int32_t>(static_cast<uint32_t>(w) - static_cast<uint32_t>(n));
   const int32_t ac =
@@ -485,7 +490,7 @@ JXL_INLINE PredictionResult Predict(
   size_t offset = 3;
   constexpr bool compute_properties =
       mode & kUseTree || mode & kForceComputeProperties;
-  constexpr bool nec = mode & kNoEdgeCases;
+  constexpr bool nec = !!(mode & kNoEdgeCases);
   pixel_type_w left = (nec || x ? pp[-1] : (y ? pp[-onerow] : 0));
   pixel_type_w top = (nec || y ? pp[-onerow] : left);
   pixel_type_w topleft = (nec || (x && y) ? pp[-1 - onerow] : left);
