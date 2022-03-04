@@ -343,6 +343,12 @@ void CompressArgs::AddCommandLineOptions(CommandLineParser* cmdline) {
       &params.speed_tier, &ParseSpeedTier);
 
   cmdline->AddOptionValue(
+      '\0', "brotli_effort", "EFFORT",
+      "Brotli effort setting. Range: 1 .. 11.\n"
+      "    Default: 9. Higher number is more effort (slower).",
+      &params.brotli_effort, &ParseUnsigned, 1);
+
+  cmdline->AddOptionValue(
       's', "speed", "ANIMAL",
       "Deprecated synonym for --effort. Valid values are:\n"
       "    lightning (1), thunder, falcon, cheetah, hare, wombat, squirrel, "
@@ -646,7 +652,10 @@ jxl::Status CompressArgs::ValidateArgs(const CommandLineParser& cmdline) {
   if (got_target_bpp || got_target_size) {
     jpeg_transcode = false;
   }
-
+  if (params.brotli_effort > 11) {
+    fprintf(stderr, "Invalid --brotli_effort value\n");
+    return false;
+  }
   if (got_target_bpp + got_target_size + got_distance + got_quality > 1) {
     fprintf(stderr,
             "You can specify only one of '--distance', '-q', "

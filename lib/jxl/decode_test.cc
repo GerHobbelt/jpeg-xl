@@ -211,7 +211,7 @@ PaddedBytes CreateTestJXLCodestream(
                             jpeg_bytes.data() + jpeg_bytes.size());
     EXPECT_TRUE(jxl::jpeg::DecodeImageJPG(
         jxl::Span<const uint8_t>(jpeg_bytes.data(), jpeg_bytes.size()), &io));
-    EXPECT_TRUE(EncodeJPEGData(*io.Main().jpeg_data, &jpeg_data));
+    EXPECT_TRUE(EncodeJPEGData(*io.Main().jpeg_data, &jpeg_data, 5));
     io.metadata.m.xyb_encoded = false;
 #else   // JPEGXL_ENABLE_JPEG
     JXL_ABORT(
@@ -3608,7 +3608,7 @@ TEST(DecodeTest, JXL_TRANSCODE_JPEG_TEST(JPEGReconstructionTest)) {
                                /*aux_out=*/nullptr));
 
   jxl::PaddedBytes jpeg_data;
-  ASSERT_TRUE(EncodeJPEGData(*orig_io.Main().jpeg_data.get(), &jpeg_data));
+  ASSERT_TRUE(EncodeJPEGData(*orig_io.Main().jpeg_data.get(), &jpeg_data, 5));
   jxl::PaddedBytes container;
   container.append(jxl::kContainerHeader,
                    jxl::kContainerHeader + sizeof(jxl::kContainerHeader));

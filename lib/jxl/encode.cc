@@ -425,7 +425,7 @@ JxlEncoderStatus JxlEncoderStruct::RefillOutputByteQueue() {
       for (size_t i = 0; i < 4; i++) {
         compressed[i] = static_cast<uint8_t>(box->type[i]);
       }
-      if (JXL_ENC_SUCCESS != BrotliCompress(9, box->contents.data(),
+      if (JXL_ENC_SUCCESS != BrotliCompress(brotli_effort, box->contents.data(),
                                             box->contents.size(),
                                             &compressed)) {
         return JXL_API_ERROR("Brotli compression for brob box failed");
@@ -761,6 +761,15 @@ JxlEncoderStatus JxlEncoderFrameSettingsSetOption(
       }
       frame_settings->values.cparams.speed_tier =
           static_cast<jxl::SpeedTier>(10 - value);
+      return JXL_ENC_SUCCESS;
+    case JXL_ENC_FRAME_SETTING_BROTLI_EFFORT:
+      if (value < 0 || value > 11) {
+        return JXL_ENC_ERROR;
+      }
+      // set cparams for brotli use in JPEG frames
+      frame_settings->values.cparams.brotli_effort = value;
+      // set enc option for brotli use in brob boxes
+      frame_settings->enc->brotli_effort = value;
       return JXL_ENC_SUCCESS;
     case JXL_ENC_FRAME_SETTING_DECODING_SPEED:
       if (value < 0 || value > 4) {
@@ -1126,7 +1135,9 @@ JxlEncoderStatus JxlEncoderAddJPEGFrame(
   if (frame_settings->enc->store_jpeg_metadata) {
     jxl::jpeg::JPEGData data_in = *io.Main().jpeg_data;
     jxl::PaddedBytes jpeg_data;
-    if (!jxl::jpeg::EncodeJPEGData(data_in, &jpeg_data)) {
+    if (!jxl::jpeg::EncodeJPEGData(
+            data_in, &jpeg_data,
+            frame_settings->values.cparams.brotli_effort)) {
       return JXL_ENC_ERROR;
     }
     frame_settings->enc->jpeg_metadata = std::vector<uint8_t>(
