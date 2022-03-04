@@ -271,7 +271,7 @@ Status ConvertCodecInOutToPackedPixelFile(const CodecInOut& io,
 
     // TODO(firsching): Convert the extra channels, beside one potential alpha
     // channel. FIXME!
-    JXL_CHECK(frame.extra_channels().size() <= has_alpha);
+    JXL_CHECK(frame.extra_channels().size() <= (int)has_alpha);
     ppf->frames.push_back(std::move(packed_frame));
   }
 
