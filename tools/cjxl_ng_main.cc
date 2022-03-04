@@ -388,7 +388,13 @@ jxl::Status LoadInput(const char* filename_in,
 
 }  // namespace
 
-int main(int argc, char** argv) {
+
+
+#if defined(BUILD_MONOLITHIC)
+#define main(cnt, arr) jpegXL_compress_ng_main(cnt, arr)
+#endif
+
+int main(int argc, const char** argv) {
   std::cerr << "Warning: This is work in progress, consider using cjxl "
                "instead!\n";
   gflags::SetUsageMessage(

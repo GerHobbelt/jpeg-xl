@@ -346,7 +346,13 @@ int DecompressJxlToPackedPixelFile(const std::vector<uint8_t>& compressed,
   return EXIT_SUCCESS;
 }
 
-int main(int argc, char** argv) {
+
+
+#if defined(BUILD_MONOLITHIC)
+#define main(cnt, arr) jpegXL_decompress_ng_main(cnt, arr)
+#endif
+
+int main(int argc, const char** argv) {
   std::cerr << "Warning: This is work in progress, consider using djxl "
                "instead!\n";
 
