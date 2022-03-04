@@ -230,16 +230,26 @@ void LowMemoryRenderPipeline::Init() {
   // the vector size (required for EPF stages). Vectors on ARM NEON are never
   // wider than 4 floats, so rounding to multiples of 4 is enough.
 #if JXL_ARCH_ARM
-  group_border_.first = RoundUpTo(group_border_.first, 4);
+  constexpr size_t kGroupXAlign = 4;
 #else
-  group_border_.first = RoundUpToBlockDim(group_border_.first);
+  constexpr size_t kGroupXAlign = 16;
 #endif
+  group_border_.first = RoundUpTo(group_border_.first, kGroupXAlign);
+  // Allocate borders in group images that are just enough for storing the
+  // borders to be copied in, plus any rounding to ensure alignment.
+  std::pair<size_t, size_t> max_border = {0, 0};
+  for (size_t c = 0; c < shifts.size(); c++) {
+    max_border.first = std::max(BorderToStore(c).first, max_border.first);
+    max_border.second = std::max(BorderToStore(c).second, max_border.second);
+  }
+  kGroupDataXBorder = RoundUpTo(max_border.first, kGroupXAlign);
+  kGroupDataYBorder = max_border.second;
 
   EnsureBordersStorage();
   group_border_assigner_.Init(frame_dimensions_);
 
-  first_trailing_stage_ = stages_.size();
-  for (; first_trailing_stage_ > 0; first_trailing_stage_--) {
+  for (first_trailing_stage_ = stages_.size(); first_trailing_stage_ > 0;
+       first_trailing_stage_--) {
     bool has_inout_c = false;
     for (size_t c = 0; c < shifts.size(); c++) {
       if (stages_[first_trailing_stage_ - 1]->GetChannelMode(c) ==

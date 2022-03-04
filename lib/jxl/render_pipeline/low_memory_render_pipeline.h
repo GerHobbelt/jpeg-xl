@@ -68,10 +68,9 @@ class LowMemoryRenderPipeline final : public RenderPipeline {
   // [group][channel] depending on `use_group_ids_`.
   std::vector<std::vector<ImageF>> group_data_;
 
-  // TODO(veluca): these constants can definitely be lowered.
-  static constexpr size_t kGroupDataYBorder = kMaxFinalizeRectPadding * 8 + 16;
-  static constexpr size_t kGroupDataXBorder =
-      RoundUpToBlockDim(kMaxFinalizeRectPadding) * 8 + kBlockDim;
+  // Borders for storing group data.
+  size_t kGroupDataYBorder = kMaxFinalizeRectPadding * 8 + 16;
+  size_t kGroupDataXBorder = RoundUpToBlockDim(kMaxFinalizeRectPadding) * 8 + kBlockDim;
 
   // Buffers for intermediate rows for the various stages, indexed by
   // [thread][channel][stage].
