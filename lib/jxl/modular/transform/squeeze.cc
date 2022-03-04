@@ -102,7 +102,10 @@ Status InvHSqueeze(Image &input, uint32_t c, uint32_t rc, ThreadPool *pool) {
   intptr_t onerow_in = chin.plane.PixelsPerRow();
   intptr_t onerow_inr = chin_residual.plane.PixelsPerRow();
   intptr_t onerow_out = chout.plane.PixelsPerRow();
-  constexpr int kRowsPerThread = 8;
+  //constexpr int kRowsPerThread = 8;
+  enum {
+	  kRowsPerThread = 8,
+  };
   JXL_RETURN_IF_ERROR(RunOnPool(
       pool, 0, chin.h / kRowsPerThread, ThreadPool::NoInit,
       [&](const uint32_t task, size_t /* thread */) {
