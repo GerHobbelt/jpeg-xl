@@ -256,6 +256,7 @@ jobs:
 
           - arch: i386
             lowprecision:
+            test_in_pr: true
             build_target: i686-linux-gnu
 
     env:
