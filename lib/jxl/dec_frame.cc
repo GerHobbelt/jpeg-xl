@@ -99,33 +99,6 @@ Status DecodeFrameHeader(BitReader* JXL_RESTRICT reader,
   return true;
 }
 
-Status SkipFrame(const CodecMetadata& metadata, BitReader* JXL_RESTRICT reader,
-                 bool is_preview) {
-  FrameHeader header(&metadata);
-  header.nonserialized_is_preview = is_preview;
-  JXL_RETURN_IF_ERROR(DecodeFrameHeader(reader, &header));
-
-  // Read TOC.
-  std::vector<uint64_t> group_offsets;
-  std::vector<uint32_t> group_sizes;
-  uint64_t groups_total_size;
-  const bool has_ac_global = true;
-  const FrameDimensions frame_dim = header.ToFrameDimensions();
-  const size_t toc_entries =
-      NumTocEntries(frame_dim.num_groups, frame_dim.num_dc_groups,
-                    header.passes.num_passes, has_ac_global);
-  JXL_RETURN_IF_ERROR(ReadGroupOffsets(toc_entries, reader, &group_offsets,
-                                       &group_sizes, &groups_total_size));
-
-  // Pretend all groups are read.
-  reader->SkipBits(groups_total_size * kBitsPerByte);
-  if (reader->TotalBitsConsumed() > reader->TotalBytes() * kBitsPerByte) {
-    return JXL_FAILURE("Group code extends after stream end");
-  }
-
-  return true;
-}
-
 static BitReader* GetReaderForSection(
     size_t num_groups, size_t num_passes, size_t group_codes_begin,
     const std::vector<uint64_t>& group_offsets,
@@ -305,6 +278,15 @@ Status FrameDecoder::InitFrame(BitReader* JXL_RESTRICT br, ImageBundle* decoded,
   decoded->ClearExtraChannels();
 
   decoded->duration = frame_header_.animation_frame.duration;
+
+  if (!frame_header_.nonserialized_is_preview &&
+      (frame_header_.frame_type == kRegularFrame ||
+       frame_header_.frame_type == kSkipProgressive)) {
+    ++dec_state_->visible_frame_index;
+    dec_state_->nonvisible_frame_index = 0;
+  } else {
+    ++dec_state_->nonvisible_frame_index;
+  }
 
   // Read TOC.
   uint64_t groups_total_size;
@@ -671,7 +653,6 @@ Status FrameDecoder::ProcessACGroup(size_t ac_group_id,
   if ((frame_header_.flags & FrameHeader::kNoise) != 0 &&
       render_pipeline_input) {
     PROFILER_ZONE("GenerateNoise");
-    size_t num_x_groups = DivCeil(frame_dim_.xsize_upsampled_padded, kGroupDim);
     size_t noise_c_start =
         3 + frame_header_.nonserialized_metadata->m.num_extra_channels;
     // When the color channels are downsampled, we need to generate more noise
@@ -688,9 +669,10 @@ Status FrameDecoder::ProcessACGroup(size_t ac_group_id,
                                  r.second.y0() + iy * kGroupDim, kGroupDim,
                                  kGroupDim, x1, y1);
         }
-        Random3Planes(dec_state_->noise_seed +
-                          (gx * frame_header_.upsampling + ix) +
-                          (gy * frame_header_.upsampling + iy) * num_x_groups,
+        Random3Planes(dec_state_->visible_frame_index,
+                      dec_state_->nonvisible_frame_index,
+                      (gx * frame_header_.upsampling + ix) * kGroupDim,
+                      (gy * frame_header_.upsampling + iy) * kGroupDim,
                       rects[0], rects[1], rects[2]);
       }
     }

@@ -297,7 +297,6 @@ class ANSSymbolReader {
     const size_t bits = br->PeekBits(nbits);
     br->Consume(nbits);
     *value = offset | bits;
-    return;
   }
   // True if RLE-only Huffman coding is used, with HybridUintConfig 000.
   bool HuffRleOnly() {

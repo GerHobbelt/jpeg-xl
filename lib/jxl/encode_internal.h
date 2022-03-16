@@ -147,6 +147,7 @@ struct JxlEncoderStruct {
   bool boxes_closed;
   bool basic_info_set;
   bool color_encoding_set;
+  bool intensity_target_set;
   int brotli_effort = 9;
 
   // Takes the first frame in the input_queue, encodes it, and appends

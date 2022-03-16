@@ -255,7 +255,8 @@ void PrintMode(jxl::ThreadPoolInternal* pool, const jxl::CodecInOut& io,
           (args.use_container ? "Container | " : ""), mode, quality.c_str(),
           speed);
   if (args.use_container) {
-    if (args.jpeg_transcode) fprintf(stderr, " | JPEG reconstruction data");
+    if (args.jpeg_transcode && args.store_jpeg_metadata)
+      fprintf(stderr, " | JPEG reconstruction data");
     if (!io.blobs.exif.empty())
       fprintf(stderr, " | %" PRIuS "-byte Exif", io.blobs.exif.size());
     if (!io.blobs.xmp.empty())
@@ -306,6 +307,10 @@ void CompressArgs::AddCommandLineOptions(CommandLineParser* cmdline) {
                          "Do not encode using container format (strips "
                          "Exif/XMP/JPEG bitstream reconstruction data)",
                          &no_container, &SetBooleanTrue, 2);
+
+  cmdline->AddOptionFlag('\0', "strip_jpeg_metadata",
+                         "Do not encode JPEG bitstream reconstruction data",
+                         &store_jpeg_metadata, &SetBooleanFalse, 2);
 
   // Target distance/size/bpp
   opt_distance_id = cmdline->AddOptionValue(
@@ -434,15 +439,15 @@ void CompressArgs::AddCommandLineOptions(CommandLineParser* cmdline) {
                           "force disable/enable patches generation.",
                           &params.patches, &ParseOverride, 1);
   cmdline->AddOptionValue(
-      '\0', "resampling", "0|1|2|4|8",
-      "Subsample all color channels by this factor, or use 0 to choose the "
+      '\0', "resampling", "-1|1|2|4|8",
+      "Subsample all color channels by this factor, or use -1 to choose the "
       "resampling factor based on distance.",
-      &params.resampling, &ParseUnsigned, 0);
+      &params.resampling, &ParseSigned, 0);
   cmdline->AddOptionValue(
       '\0', "ec_resampling", "1|2|4|8",
       "Subsample all extra channels by this factor. If this value is smaller "
       "than the resampling of color channels, it will be increased to match.",
-      &params.ec_resampling, &ParseUnsigned, 2);
+      &params.ec_resampling, &ParseSigned, 2);
   cmdline->AddOptionFlag('\0', "already_downsampled",
                          "Do not downsample the given input before encoding, "
                          "but still signal that the decoder should upsample.",
@@ -718,7 +723,8 @@ jxl::Status CompressArgs::ValidateArgsAfterLoad(
     }
   }
   if (!io.blobs.exif.empty() || !io.blobs.xmp.empty() ||
-      !io.blobs.jumbf.empty() || !io.blobs.iptc.empty() || jpeg_transcode) {
+      !io.blobs.jumbf.empty() || !io.blobs.iptc.empty() ||
+      (jpeg_transcode && store_jpeg_metadata)) {
     use_container = true;
   }
   if (no_container) use_container = false;
