@@ -47,31 +47,6 @@
 #ifndef LIB_JXL_ENC_COLOR_MANAGEMENT_CC_
 #define LIB_JXL_ENC_COLOR_MANAGEMENT_CC_
 
-#if !JPEGXL_ENABLE_SKCMS
-
-namespace {
-
-void ErrorHandler(cmsContext context, cmsUInt32Number code, const char* text) {
-  JXL_WARNING("LCMS error %u: %s", code, text);
-}
-
-// Returns a context for the current thread, creating it if necessary.
-cmsContext GetContext() {
-  static thread_local void* context_;
-  if (context_ == nullptr) {
-    context_ = cmsCreateContext(nullptr, nullptr);
-    JXL_ASSERT(context_ != nullptr);
-
-    cmsSetLogErrorHandler(static_cast<cmsContext>(context_), &ErrorHandler);
-  }
-  return static_cast<cmsContext>(context_);
-}
-
-}  // namespace
-
-#endif  // !JPEGXL_ENABLE_SKCMS
-
-
 namespace jxl {
 namespace {
 struct JxlCms {
@@ -104,6 +79,26 @@ Status ApplyHlgOotf(JxlCms* t, float* JXL_RESTRICT buf, size_t xsize,
 }  // namespace jxl
 
 #endif  // LIB_JXL_ENC_COLOR_MANAGEMENT_CC_
+
+#if !JPEGXL_ENABLE_SKCMS
+
+static void ErrorHandler(cmsContext context, cmsUInt32Number code, const char* text) {
+	JXL_WARNING("LCMS error %u: %s", code, text);
+}
+
+// Returns a context for the current thread, creating it if necessary.
+static cmsContext GetContext() {
+	static thread_local void* context_;
+	if (context_ == nullptr) {
+		context_ = cmsCreateContext(nullptr, nullptr);
+		JXL_ASSERT(context_ != nullptr);
+
+		cmsSetLogErrorHandler(static_cast<cmsContext>(context_), &ErrorHandler);
+	}
+	return static_cast<cmsContext>(context_);
+}
+
+#endif  // JPEGXL_ENABLE_SKCMS
 
 HWY_BEFORE_NAMESPACE();
 namespace jxl {
@@ -233,8 +228,6 @@ Status DoColorSpaceTransform(void* cms_data, const size_t thread,
   // No lock needed.
   JxlCms* t = reinterpret_cast<JxlCms*>(cms_data);
 
-  const cmsContext context = GetContext();
-
   const float* xform_src = buf_src;  // Read-only.
   if (t->preprocess != ExtraTF::kNone) {
     float* mutable_xform_src = t->buf_src.Row(thread);  // Writable buffer.
@@ -287,7 +280,9 @@ Status DoColorSpaceTransform(void* cms_data, const size_t thread,
                         skcms_PixelFormat_RGB_fff, skcms_AlphaFormat_Opaque,
                         &t->profile_dst, xsize));
 #else   // JPEGXL_ENABLE_SKCMS
-    cmsDoTransform(context, t->lcms_transform, xform_src, buf_dst,
+	  const cmsContext context = GetContext();
+
+	  cmsDoTransform(context, t->lcms_transform, xform_src, buf_dst,
                    static_cast<cmsUInt32Number>(xsize));
 #endif  // JPEGXL_ENABLE_SKCMS
   }
@@ -344,6 +339,7 @@ JXL_MUST_USE_RESULT CIExy CIExyFromXYZ(const float XYZ[3]) {
 }
 
 #else  // JPEGXL_ENABLE_SKCMS
+
 // (LCMS interface requires xyY but we omit the Y for white points/primaries.)
 
 JXL_MUST_USE_RESULT CIExy CIExyFromxyY(const cmsCIExyY& xyY) {
@@ -837,6 +833,7 @@ Status ColorEncoding::SetFieldsFromICC() {
   if (icc_.empty()) return JXL_FAILURE("Empty ICC profile");
 
 #if JPEGXL_ENABLE_SKCMS
+
   if (icc_.size() < 128) {
     return JXL_FAILURE("ICC file too small");
   }
@@ -866,6 +863,7 @@ Status ColorEncoding::SetFieldsFromICC() {
   DetectTransferFunction(profile, this);
   // ICC and RenderingIntent have the same values (0..3).
   rendering_intent = static_cast<RenderingIntent>(rendering_intent32);
+
 #else  // JPEGXL_ENABLE_SKCMS
 
   const cmsContext context = GetContext();
