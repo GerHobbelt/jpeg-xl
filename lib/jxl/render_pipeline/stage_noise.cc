@@ -11,6 +11,7 @@
 #include <hwy/highway.h>
 
 #include "lib/jxl/fast_math-inl.h"
+#include "lib/jxl/sanitizers.h"
 #include "lib/jxl/transfer_functions-inl.h"
 
 HWY_BEFORE_NAMESPACE();
@@ -239,8 +240,8 @@ class ConvolveNoiseStage : public RenderPipelineStage {
         rows[i] = GetInputRow(input_rows, c, i - 2);
       }
       float* JXL_RESTRICT row_out = GetOutputRow(output_rows, c, 0);
-      for (int64_t x = -RoundUpTo(xextra, Lanes(d));
-           x < (int64_t)(xsize + xextra); x += Lanes(d)) {
+      for (ssize_t x = -RoundUpTo(xextra, Lanes(d));
+           x < (ssize_t)(xsize + xextra); x += Lanes(d)) {
         const auto p00 = Load(d, rows[2] + x);
         auto others = Zero(d);
         for (ssize_t i = -2; i <= 2; i++) {

@@ -9,7 +9,6 @@
 #include <stdint.h>
 
 #include "lib/jxl/base/arch_macros.h"
-#include "lib/jxl/filters.h"
 #include "lib/jxl/frame_header.h"
 
 namespace jxl {
@@ -22,7 +21,7 @@ namespace jxl {
 #if JXL_ARCH_ARM
 constexpr size_t kRenderPipelineXOffset = 16;
 #else
-constexpr size_t kRenderPipelineXOffset = 64;
+constexpr size_t kRenderPipelineXOffset = 32;
 #endif
 
 enum class RenderPipelineChannelMode {

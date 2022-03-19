@@ -52,20 +52,20 @@ void LowMemoryRenderPipeline::SaveBorders(size_t group_id, size_t c,
   size_t bordery_write = borders.second;
 
   CopyImageTo(
-      Rect(kGroupDataXBorder, kGroupDataYBorder, x1 - x0, bordery_write), in,
-      Rect(x0, (gy * 2) * bordery_write, x1 - x0, bordery_write),
+      Rect(group_data_x_border_, group_data_y_border_, x1 - x0, bordery_write),
+      in, Rect(x0, (gy * 2) * bordery_write, x1 - x0, bordery_write),
       &borders_horizontal_[c]);
   CopyImageTo(
-      Rect(kGroupDataXBorder, kGroupDataYBorder + y1 - y0 - bordery_write,
+      Rect(group_data_x_border_, group_data_y_border_ + y1 - y0 - bordery_write,
            x1 - x0, bordery_write),
       in, Rect(x0, (gy * 2 + 1) * bordery_write, x1 - x0, bordery_write),
       &borders_horizontal_[c]);
   CopyImageTo(
-      Rect(kGroupDataXBorder, kGroupDataYBorder, borderx_write, y1 - y0), in,
-      Rect((gx * 2) * borderx_write, y0, borderx_write, y1 - y0),
+      Rect(group_data_x_border_, group_data_y_border_, borderx_write, y1 - y0),
+      in, Rect((gx * 2) * borderx_write, y0, borderx_write, y1 - y0),
       &borders_vertical_[c]);
-  CopyImageTo(Rect(kGroupDataXBorder + x1 - x0 - borderx_write,
-                   kGroupDataYBorder, borderx_write, y1 - y0),
+  CopyImageTo(Rect(group_data_x_border_ + x1 - x0 - borderx_write,
+                   group_data_y_border_, borderx_write, y1 - y0),
               in,
               Rect((gx * 2 + 1) * borderx_write, y0, borderx_write, y1 - y0),
               &borders_vertical_[c]);
@@ -122,8 +122,9 @@ void LowMemoryRenderPipeline::LoadBorders(size_t group_id, size_t c,
     CopyImageTo(
         Rect(x0src, (gy * 2 - 1) * bordery_write, x1src - x0src, bordery_write),
         borders_horizontal_[c],
-        Rect(kGroupDataXBorder + x0src - x0, kGroupDataYBorder - bordery_write,
-             x1src - x0src, bordery_write),
+        Rect(group_data_x_border_ + x0src - x0,
+             group_data_y_border_ - bordery_write, x1src - x0src,
+             bordery_write),
         out);
   }
   if (y1src > y1) {
@@ -132,7 +133,7 @@ void LowMemoryRenderPipeline::LoadBorders(size_t group_id, size_t c,
     CopyImageTo(
         Rect(x0src, (gy * 2 + 2) * bordery_write, x1src - x0src, bordery_write),
         borders_horizontal_[c],
-        Rect(kGroupDataXBorder + x0src - x0, kGroupDataYBorder + y1 - y0,
+        Rect(group_data_x_border_ + x0src - x0, group_data_y_border_ + y1 - y0,
              x1src - x0src, bordery_write),
         out);
   }
@@ -141,8 +142,8 @@ void LowMemoryRenderPipeline::LoadBorders(size_t group_id, size_t c,
     CopyImageTo(
         Rect((gx * 2 - 1) * borderx_write, y0src, borderx_write, y1src - y0src),
         borders_vertical_[c],
-        Rect(kGroupDataXBorder - borderx_write, kGroupDataYBorder + y0src - y0,
-             borderx_write, y1src - y0src),
+        Rect(group_data_x_border_ - borderx_write,
+             group_data_y_border_ + y0src - y0, borderx_write, y1src - y0src),
         out);
   }
   if (x1src > x1) {
@@ -151,7 +152,7 @@ void LowMemoryRenderPipeline::LoadBorders(size_t group_id, size_t c,
     CopyImageTo(
         Rect((gx * 2 + 2) * borderx_write, y0src, borderx_write, y1src - y0src),
         borders_vertical_[c],
-        Rect(kGroupDataXBorder + x1 - x0, kGroupDataYBorder + y0src - y0,
+        Rect(group_data_x_border_ + x1 - x0, group_data_y_border_ + y0src - y0,
              borderx_write, y1src - y0src),
         out);
   }
@@ -242,8 +243,8 @@ void LowMemoryRenderPipeline::Init() {
     max_border.first = std::max(BorderToStore(c).first, max_border.first);
     max_border.second = std::max(BorderToStore(c).second, max_border.second);
   }
-  kGroupDataXBorder = RoundUpTo(max_border.first, kGroupXAlign);
-  kGroupDataYBorder = max_border.second;
+  group_data_x_border_ = RoundUpTo(max_border.first, kGroupXAlign);
+  group_data_y_border_ = max_border.second;
 
   EnsureBordersStorage();
   group_border_assigner_.Init(frame_dimensions_);
@@ -357,8 +358,8 @@ void LowMemoryRenderPipeline::PrepareForThreadsInternal(size_t num,
     group_data_.emplace_back();
     group_data_[t].resize(shifts.size());
     for (size_t c = 0; c < shifts.size(); c++) {
-      group_data_[t][c] = ImageF(GroupInputXSize(c) + kGroupDataXBorder * 2,
-                                 GroupInputYSize(c) + kGroupDataYBorder * 2);
+      group_data_[t][c] = ImageF(GroupInputXSize(c) + group_data_x_border_ * 2,
+                                 GroupInputYSize(c) + group_data_y_border_ * 2);
     }
   }
   // TODO(veluca): avoid reallocating buffers if not needed.
@@ -387,9 +388,12 @@ void LowMemoryRenderPipeline::PrepareForThreadsInternal(size_t num,
     out_of_frame_data_.resize(num);
     size_t out_of_frame_xsize =
         2 * kRenderPipelineXOffset +
-        std::max<size_t>(frame_origin_.x0,
-                         full_image_xsize_ - frame_origin_.x0 -
-                             frame_dimensions_.xsize_upsampled);
+        std::max<ssize_t>(
+            0,
+            std::max<ssize_t>(
+                frame_origin_.x0,
+                static_cast<ssize_t>(full_image_xsize_) - frame_origin_.x0 -
+                    static_cast<ssize_t>(frame_dimensions_.xsize_upsampled)));
     out_of_frame_xsize = std::max(out_of_frame_xsize, stage_buffer_xsize);
     for (size_t t = 0; t < num; t++) {
       out_of_frame_data_[t] = ImageF(out_of_frame_xsize, shifts.size());
@@ -404,14 +408,14 @@ std::vector<std::pair<ImageF*, Rect>> LowMemoryRenderPipeline::PrepareBuffers(
   const size_t gy = group_id / frame_dimensions_.xsize_groups;
   for (size_t c = 0; c < channel_shifts_[0].size(); c++) {
     ret[c].first = &group_data_[use_group_ids_ ? group_id : thread_id][c];
-    ret[c].second = Rect(kGroupDataXBorder, kGroupDataYBorder,
+    ret[c].second = Rect(group_data_x_border_, group_data_y_border_,
                          GroupInputXSize(c), GroupInputYSize(c),
                          DivCeil(frame_dimensions_.xsize_upsampled,
                                  1 << channel_shifts_[0][c].first) -
-                             gx * GroupInputXSize(c) + kGroupDataXBorder,
+                             gx * GroupInputXSize(c) + group_data_x_border_,
                          DivCeil(frame_dimensions_.ysize_upsampled,
                                  1 << channel_shifts_[0][c].second) -
-                             gy * GroupInputYSize(c) + kGroupDataYBorder);
+                             gy * GroupInputYSize(c) + group_data_y_border_);
   }
   return ret;
 }
@@ -510,13 +514,13 @@ void LowMemoryRenderPipeline::RenderRect(size_t thread_id,
 
   for (size_t c = 0; c < input_data.size(); c++) {
     int xoff = int(data_max_color_channel_rect.x0()) -
-               int(LowMemoryRenderPipeline::kGroupDataXBorder);
+               int(LowMemoryRenderPipeline::group_data_x_border_);
     xoff = xoff * (1 << base_color_shift_) >> channel_shifts_[0][c].first;
-    xoff += LowMemoryRenderPipeline::kGroupDataXBorder;
+    xoff += LowMemoryRenderPipeline::group_data_x_border_;
     int yoff = int(data_max_color_channel_rect.y0()) -
-               int(LowMemoryRenderPipeline::kGroupDataYBorder);
+               int(LowMemoryRenderPipeline::group_data_y_border_);
     yoff = yoff * (1 << base_color_shift_) >> channel_shifts_[0][c].second;
-    yoff += LowMemoryRenderPipeline::kGroupDataYBorder;
+    yoff += LowMemoryRenderPipeline::group_data_y_border_;
     rows[0][c].base_ptr =
         input_data[c].Row(yoff) + xoff - kRenderPipelineXOffset;
     rows[0][c].stride = input_data[c].PixelsPerRow();
@@ -764,9 +768,9 @@ void LowMemoryRenderPipeline::ProcessBuffers(size_t group_id,
       LoadBorders(group_id, c, image_max_color_channel_rect, &input_data[c]);
     }
     Rect data_max_color_channel_rect(
-        kGroupDataXBorder + image_max_color_channel_rect.x0() -
+        group_data_x_border_ + image_max_color_channel_rect.x0() -
             gx * frame_dimensions_.group_dim,
-        kGroupDataYBorder + image_max_color_channel_rect.y0() -
+        group_data_y_border_ + image_max_color_channel_rect.y0() -
             gy * frame_dimensions_.group_dim,
         image_max_color_channel_rect.xsize(),
         image_max_color_channel_rect.ysize());

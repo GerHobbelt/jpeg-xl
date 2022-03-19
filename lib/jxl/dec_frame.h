@@ -204,7 +204,6 @@ class FrameDecoder {
   Status ProcessDCGroup(size_t dc_group_id, BitReader* br);
   void FinalizeDC();
   Status AllocateOutput();
-  Status PreparePipeline();
   Status ProcessACGlobal(BitReader* br);
   Status ProcessACGroup(size_t ac_group_id, BitReader* JXL_RESTRICT* br,
                         size_t num_passes, size_t thread, bool force_draw,
@@ -222,12 +221,12 @@ class FrameDecoder {
     if (storage_size > group_dec_caches_.size()) {
       group_dec_caches_.resize(storage_size);
     }
-    dec_state_->EnsureStorage(storage_size);
     use_task_id_ = num_threads > num_tasks;
     if (dec_state_->render_pipeline) {
       dec_state_->render_pipeline->PrepareForThreads(
-          storage_size, modular_frame_decoder_.UsesFullImage() &&
-                            frame_header_.encoding == FrameEncoding::kVarDCT);
+          storage_size,
+          /*use_group_ids=*/modular_frame_decoder_.UsesFullImage() &&
+              frame_header_.encoding == FrameEncoding::kVarDCT);
     }
   }
 
@@ -247,7 +246,7 @@ class FrameDecoder {
         decoded_->metadata()->GetOrientation() != Orientation::kIdentity) {
       return false;
     }
-    if (ImageBlender::NeedsBlending(dec_state_)) return false;
+    if (NeedsBlending(dec_state_)) return false;
     if (frame_header_.CanBeReferenced()) return false;
     if (render_spotcolors_ &&
         decoded_->metadata()->Find(ExtraChannel::kSpotColor)) {
@@ -272,9 +271,9 @@ class FrameDecoder {
   bool render_spotcolors_ = true;
   bool coalescing_ = true;
 
-  std::vector<bool> processed_section_;
+  std::vector<uint8_t> processed_section_;
   std::vector<uint8_t> decoded_passes_per_ac_group_;
-  std::vector<bool> decoded_dc_groups_;
+  std::vector<uint8_t> decoded_dc_groups_;
   bool decoded_dc_global_;
   bool decoded_ac_global_;
   bool HasEverything() const;

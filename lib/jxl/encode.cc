@@ -52,7 +52,9 @@ namespace {
 template <typename T>
 void AppendJxlpBoxCounter(uint32_t counter, bool last, T* output) {
   if (last) counter |= 0x80000000;
-  StoreBE32(counter, jxl::Extend(output, 4));
+  for (size_t i = 0; i < 4; i++) {
+    output->push_back(counter >> (8 * (3 - i)) & 0xff);
+  }
 }
 
 void QueueFrame(
@@ -284,7 +286,7 @@ JxlEncoderStatus JxlEncoderStruct::RefillOutputByteQueue() {
         bytes.clear();
       }
 
-      if (store_jpeg_metadata && jpeg_metadata.size() > 0) {
+      if (store_jpeg_metadata && !jpeg_metadata.empty()) {
         jxl::AppendBoxHeader(jxl::MakeBoxType("jbrd"), jpeg_metadata.size(),
                              false, &output_byte_queue);
         output_byte_queue.insert(output_byte_queue.end(), jpeg_metadata.begin(),
@@ -1359,8 +1361,7 @@ JxlEncoderStatus JxlEncoderProcessOutput(JxlEncoder* enc, uint8_t** next_out,
          (!enc->output_byte_queue.empty() || !enc->input_queue.empty())) {
     if (!enc->output_byte_queue.empty()) {
       size_t to_copy = std::min(*avail_out, enc->output_byte_queue.size());
-      memcpy(static_cast<void*>(*next_out), enc->output_byte_queue.data(),
-             to_copy);
+      std::copy_n(enc->output_byte_queue.begin(), to_copy, *next_out);
       *next_out += to_copy;
       *avail_out -= to_copy;
       enc->output_byte_queue.erase(enc->output_byte_queue.begin(),

@@ -62,8 +62,8 @@ class GaborishStage : public RenderPipelineStage {
 #endif
       // Since GetInputRow(input_rows, c, {-1, 0, 1}) is aligned, rounding
       // xextra up to Lanes(d) doesn't access anything problematic.
-      for (int64_t x = -RoundUpTo(xextra, Lanes(d));
-           x < (int64_t)(xsize + xextra); x += Lanes(d)) {
+      for (ssize_t x = -RoundUpTo(xextra, Lanes(d));
+           x < (ssize_t)(xsize + xextra); x += Lanes(d)) {
         const auto t = LoadMaybeU(d, row_t + x);
         const auto tl = LoadU(d, row_t + x - 1);
         const auto tr = LoadU(d, row_t + x + 1);

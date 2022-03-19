@@ -9,7 +9,6 @@
 #include <stdint.h>
 
 #include "lib/jxl/dec_group_border.h"
-#include "lib/jxl/filters.h"
 #include "lib/jxl/render_pipeline/render_pipeline.h"
 
 namespace jxl {
@@ -17,6 +16,7 @@ namespace jxl {
 // A multithreaded, low-memory rendering pipeline that only allocates a minimal
 // amount of buffers.
 class LowMemoryRenderPipeline final : public RenderPipeline {
+ private:
   std::vector<std::pair<ImageF*, Rect>> PrepareBuffers(
       size_t group_id, size_t thread_id) override;
 
@@ -69,8 +69,8 @@ class LowMemoryRenderPipeline final : public RenderPipeline {
   std::vector<std::vector<ImageF>> group_data_;
 
   // Borders for storing group data.
-  size_t kGroupDataYBorder = kMaxFinalizeRectPadding * 8 + 16;
-  size_t kGroupDataXBorder = RoundUpToBlockDim(kMaxFinalizeRectPadding) * 8 + kBlockDim;
+  size_t group_data_x_border_;
+  size_t group_data_y_border_;
 
   // Buffers for intermediate rows for the various stages, indexed by
   // [thread][channel][stage].
