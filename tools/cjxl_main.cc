@@ -30,7 +30,7 @@ enum CjxlRetCode : int {
   DROPPED_JBRD,
 };
 
-int CompressJpegXlMain(int argc, const char** argv) {
+static int CompressJpegXlMain(int argc, const char** argv) {
   CommandLineParser cmdline;
   CompressArgs args;
   args.AddCommandLineOptions(&cmdline);

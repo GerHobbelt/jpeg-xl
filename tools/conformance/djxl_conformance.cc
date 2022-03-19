@@ -44,7 +44,7 @@ struct DecodeOptions {
   const char* metadata_path = nullptr;
 };
 
-bool LoadFile(const char* filename, std::vector<uint8_t>* data) {
+static bool LoadFile(const char* filename, std::vector<uint8_t>* data) {
   std::ifstream ifs(filename, std::ios::binary);
   std::vector<uint8_t> contents((std::istreambuf_iterator<char>(ifs)),
                                 std::istreambuf_iterator<char>());
@@ -53,7 +53,7 @@ bool LoadFile(const char* filename, std::vector<uint8_t>* data) {
   return ifs.good();
 }
 
-bool SaveFile(const char* filename, std::vector<uint8_t> data) {
+static bool SaveFile(const char* filename, std::vector<uint8_t> data) {
   std::ofstream ofs(filename, std::ios::binary);
   ofs.write(reinterpret_cast<const char*>(data.data()), data.size());
   ofs.close();
@@ -84,7 +84,7 @@ struct ImageArray {
 };
 
 // Saves an ImageArray as a numpy 4D ndarray in binary format.
-bool SaveNPYArray(const char* filename, const ImageArray& arr) {
+static bool SaveNPYArray(const char* filename, const ImageArray& arr) {
   size_t image_size =
       sizeof(float) * arr.xsize * arr.ysize * arr.num_color_channels;
   size_t ec_size = sizeof(float) * arr.xsize * arr.ysize;
@@ -276,7 +276,7 @@ class JSONArray : public JSONField {
 
 // TODO(veluca): merge this back in DecodeJXL once/if the API supports decoding
 // to JPEG and to pixels at the same time.
-bool DecodeJXLToJpeg(const char* input_path, const char* output_path) {
+static bool DecodeJXLToJpeg(const char* input_path, const char* output_path) {
   // JPEG output buffer when reconstructing a JPEG file.
   std::vector<uint8_t> jpeg_data;
   std::vector<uint8_t> jpeg_data_chunk(16 * 1024);
@@ -343,7 +343,7 @@ bool DecodeJXLToJpeg(const char* input_path, const char* output_path) {
   return true;
 }
 
-bool DecodeJXL(const DecodeOptions& opts) {
+static bool DecodeJXL(const DecodeOptions& opts) {
   auto dec = JxlDecoderMake(nullptr);
 
   uint32_t events =
@@ -609,7 +609,7 @@ bool DecodeJXL(const DecodeOptions& opts) {
   return true;
 }
 
-int Usage(const char* program) {
+static int Usage(const char* program) {
   fprintf(
       stderr,
       "Usage: %s INPUT_JXL [-i ORG_ICC] [-p PREFIX] [-m METADATA]\n"

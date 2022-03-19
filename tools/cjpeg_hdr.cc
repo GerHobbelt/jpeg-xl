@@ -235,7 +235,7 @@ namespace tools {
 
 HWY_EXPORT(FillJPEGData);
 
-int HBDJPEGMain(int argc, const char* argv[]) {
+static int HBDJPEGMain(int argc, const char* argv[]) {
   if (argc < 3) {
     fprintf(stderr, "Usage: %s input output.jpg\n", argv[0]);
     return 1;

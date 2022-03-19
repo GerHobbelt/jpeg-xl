@@ -21,6 +21,33 @@
 #error "system not known to be little endian"
 #endif
 
+#ifndef _MSC_VER
+
+inline uint32_t Log2(uint32_t value) { return 31 - __builtin_clz(value); }
+
+#else  // _MSC_VER
+
+// derived from https://stackoverflow.com/questions/355967/how-to-use-msvc-intrinsics-to-get-the-equivalent-of-this-gcc-code
+
+#include <intrin.h>
+
+inline uint32_t Log2(uint32_t value)
+{
+	unsigned long trailing_zero = 0;
+
+	if (_BitScanForward(&trailing_zero, value))
+	{
+		return trailing_zero;
+	}
+	else
+	{
+		// This is undefined, I better choose 32 than 0
+		return 32;
+	}
+}
+
+#endif  // _MSC_VER
+
 struct BitWriter {
   void Allocate(size_t maximum_bit_size) {
     assert(data == nullptr);
@@ -264,7 +291,7 @@ constexpr size_t kChunkSize = 16;
 
 void EncodeHybridUint000(uint32_t value, uint32_t* token, uint32_t* nbits,
                          uint32_t* bits) {
-  uint32_t n = 31 - __builtin_clz(value);
+  uint32_t n = Log2(value);
   *token = value ? n + 1 : 0;
   *nbits = value ? n : 0;
   *bits = value ? value - (1 << n) : 0;
@@ -539,7 +566,7 @@ void PrepareDCGlobal(bool is_single_group, size_t width, size_t height,
 void EncodeHybridUint404_Mul16(uint32_t value, uint32_t* token_div16,
                                uint32_t* nbits, uint32_t* bits) {
   // NOTE: token in libjxl is actually << 4.
-  uint32_t n = 31 - __builtin_clz(value);
+  uint32_t n = Log2(value);
   *token_div16 = value < 16 ? 0 : n - 3;
   *nbits = value < 16 ? 0 : n - 4;
   *bits = value < 16 ? 0 : (value >> 4) - (1 << *nbits);

@@ -6,6 +6,8 @@
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
+#include <stdio.h>
 
 bool error_msg(const char* message) {
   fprintf(stderr, "%s\n", message);
@@ -14,7 +16,32 @@ bool error_msg(const char* message) {
 #define return_on_error(X) \
   if (!X) return false;
 
-size_t Log2(uint32_t value) { return 31 - __builtin_clz(value); }
+#ifndef _MSC_VER
+
+inline uint32_t Log2(uint32_t value) { return 31 - __builtin_clz(value); }
+
+#else  // _MSC_VER
+
+// derived from https://stackoverflow.com/questions/355967/how-to-use-msvc-intrinsics-to-get-the-equivalent-of-this-gcc-code
+
+#include <intrin.h>
+
+inline uint32_t Log2(uint32_t value)
+{
+	unsigned long trailing_zero = 0;
+
+	if (_BitScanForward(&trailing_zero, value))
+	{
+		return trailing_zero;
+	}
+	else
+	{
+		// This is undefined, I better choose 32 than 0
+		return 32;
+	}
+}
+
+#endif  // _MSC_VER
 
 struct HeaderPNM {
   size_t xsize;

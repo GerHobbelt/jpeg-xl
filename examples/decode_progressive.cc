@@ -21,7 +21,7 @@
 
 #include "monolithic_examples.h"
 
-bool WritePAM(const char* filename, const uint8_t* buffer, size_t w, size_t h) {
+static bool WritePAM(const char* filename, const uint8_t* buffer, size_t w, size_t h) {
   FILE* fp = fopen(filename, "wb");
   if (!fp) {
     fprintf(stderr, "Could not open %s for writing", filename);
@@ -42,7 +42,7 @@ bool WritePAM(const char* filename, const uint8_t* buffer, size_t w, size_t h) {
 /** Decodes JPEG XL image to 8-bit integer RGBA pixels and an ICC Profile, in a
  * progressive way, saving the intermediate steps.
  */
-bool DecodeJpegXlProgressive(const uint8_t* jxl, size_t size,
+static bool DecodeJpegXlProgressive(const uint8_t* jxl, size_t size,
                              const char* filename, size_t chunksize) {
   std::vector<uint8_t> pixels;
   std::vector<uint8_t> icc_profile;
@@ -166,7 +166,7 @@ bool DecodeJpegXlProgressive(const uint8_t* jxl, size_t size,
   }
 }
 
-bool LoadFile(const char* filename, std::vector<uint8_t>* out) {
+static bool LoadFile(const char* filename, std::vector<uint8_t>* out) {
   FILE* file = fopen(filename, "rb");
   if (!file) {
     return false;

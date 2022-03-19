@@ -98,7 +98,7 @@ DEFINE_bool(print_read_bytes, false, "print total number of decoded bytes");
 // TODO(firsching): wire this up.
 DEFINE_bool(quiet, false, "silence output (except for errors)");
 
-bool ReadFile(const char* filename, std::vector<uint8_t>* out) {
+static bool ReadFile(const char* filename, std::vector<uint8_t>* out) {
   FILE* file = fopen(filename, "rb");
   if (!file) {
     return false;
@@ -130,7 +130,7 @@ bool ReadFile(const char* filename, std::vector<uint8_t>* out) {
   return readsize == static_cast<size_t>(size);
 }
 
-bool WriteFile(const char* filename, const std::vector<uint8_t>& bytes) {
+static bool WriteFile(const char* filename, const std::vector<uint8_t>& bytes) {
   FILE* file = fopen(filename, "wb");
   if (!file) {
     fprintf(stderr,
@@ -156,7 +156,7 @@ bool WriteFile(const char* filename, const std::vector<uint8_t>& bytes) {
   return true;
 }
 
-int DecompressJxlReconstructJPEG(const std::vector<uint8_t>& compressed,
+static int DecompressJxlReconstructJPEG(const std::vector<uint8_t>& compressed,
                                  std::vector<uint8_t>& jpeg_bytes,
                                  JxlDecoderPtr dec,
                                  JxlThreadParallelRunnerPtr runner) {
@@ -236,7 +236,7 @@ int DecompressJxlReconstructJPEG(const std::vector<uint8_t>& compressed,
   return EXIT_SUCCESS;
 }
 
-int DecompressJxlToPackedPixelFile(const std::vector<uint8_t>& compressed,
+static int DecompressJxlToPackedPixelFile(const std::vector<uint8_t>& compressed,
                                    jxl::extras::PackedPixelFile& ppf,
                                    JxlPixelFormat& format, JxlDecoderPtr dec,
                                    JxlThreadParallelRunnerPtr runner) {

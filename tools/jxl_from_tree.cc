@@ -32,7 +32,7 @@ struct SplineData {
   std::vector<Spline> splines;
 };
 
-Splines SplinesFromSplineData(const SplineData& spline_data,
+static Splines SplinesFromSplineData(const SplineData& spline_data,
                               const ColorCorrelationMap& cmap) {
   std::vector<QuantizedSpline> quantized_splines;
   std::vector<Spline::Point> starting_points;
@@ -407,7 +407,7 @@ class Heuristics : public DefaultEncoderHeuristics {
 };
 }  // namespace
 
-int JxlFromTree(const char* in, const char* out, const char* tree_out) {
+static int JxlFromTree(const char* in, const char* out, const char* tree_out) {
   Tree tree;
   SplineData spline_data;
   CompressParams cparams = {};

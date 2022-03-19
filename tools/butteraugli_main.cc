@@ -33,7 +33,7 @@
 namespace jxl {
 namespace {
 
-Status WriteImage(Image3F&& image, const std::string& filename) {
+static Status WriteImage(Image3F&& image, const std::string& filename) {
   ThreadPoolInternal pool(4);
   CodecInOut io;
   io.metadata.m.SetUintSamples(8);
@@ -42,7 +42,7 @@ Status WriteImage(Image3F&& image, const std::string& filename) {
   return EncodeToFile(io, filename, &pool);
 }
 
-Status RunButteraugli(const char* pathname1, const char* pathname2,
+static Status RunButteraugli(const char* pathname1, const char* pathname2,
                       const std::string& distmap_filename,
                       const std::string& colorspace_hint, double p,
                       float intensity_target) {

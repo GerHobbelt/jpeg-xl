@@ -20,7 +20,7 @@ namespace {
 
 // Reads an input file (typically PNM) with color_space hint and writes to an
 // output file (typically PNG) which supports all required metadata.
-int Convert(int argc, const char** argv) {
+static int Convert(int argc, const char** argv) {
   if (argc != 4 && argc != 5) {
     fprintf(stderr, "Args: in colorspace_description out [bits]\n");
     return 1;

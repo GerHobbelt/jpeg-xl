@@ -23,7 +23,7 @@
 namespace jxl {
 namespace {
 
-void PrintXybRange() {
+static void PrintXybRange() {
   Image3F linear(1u << 16, 257);
   for (int b = 0; b < 256; ++b) {
     float* JXL_RESTRICT row0 = linear.PlaneRow(0, b + 1);

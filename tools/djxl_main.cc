@@ -34,7 +34,7 @@ namespace jpegxl {
 namespace tools {
 namespace {
 
-int DecompressMain(int argc, const char** argv) {
+static int DecompressMain(int argc, const char** argv) {
   DecompressArgs args;
   CommandLineParser cmdline;
   args.AddCommandLineOptions(&cmdline);

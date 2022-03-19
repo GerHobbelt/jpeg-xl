@@ -15,12 +15,12 @@
 namespace ssimulacra {
 namespace {
 
-int PrintUsage(const char** argv) {
+static int PrintUsage(const char** argv) {
   fprintf(stderr, "Usage: %s [-v] [-s] orig.png distorted.png\n", argv[0]);
   return 1;
 }
 
-int Run(int argc, const char** argv) {
+static int Run(int argc, const char** argv) {
   if (argc < 2) return PrintUsage(argv);
 
   bool verbose = false, simple = false;

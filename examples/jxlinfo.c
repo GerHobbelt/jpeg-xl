@@ -15,7 +15,7 @@
 
 #include "monolithic_examples.h"
 
-int PrintBasicInfo(FILE* file) {
+static int PrintBasicInfo(FILE* file) {
   uint8_t* data = NULL;
   size_t data_size = 0;
   // In how large chunks to read from the file and try decoding the basic info.
