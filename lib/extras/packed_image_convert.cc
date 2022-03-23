@@ -117,20 +117,21 @@ Status ConvertPackedPixelFileToCodecInOut(const PackedPixelFile& ppf,
     const Span<const uint8_t> span(
         static_cast<const uint8_t*>(frame.color.pixels()),
         frame.color.pixels_size);
-    Rect frame_rect =
-        Rect(frame.x0, frame.y0, frame.color.xsize, frame.color.ysize);
+    Rect frame_rect = Rect(frame.frame_info.layer_info.crop_x0,
+                           frame.frame_info.layer_info.crop_y0,
+                           frame.frame_info.layer_info.xsize,
+                           frame.frame_info.layer_info.ysize);
     JXL_ASSERT(frame_rect.IsInside(Rect(0, 0, ppf.info.xsize, ppf.info.ysize)));
-
     ImageBundle bundle(&io->metadata.m);
     if (ppf.info.have_animation) {
       bundle.duration = frame.frame_info.duration;
-      bundle.blend = frame.blend;
-      bundle.use_for_next_frame = frame.use_for_next_frame;
+      bundle.blend = frame.frame_info.layer_info.blend_info.blendmode > 0;
+      bundle.use_for_next_frame =
+          frame.frame_info.layer_info.save_as_reference > 0;
+      bundle.origin.x0 = frame.frame_info.layer_info.crop_x0;
+      bundle.origin.y0 = frame.frame_info.layer_info.crop_y0;
     }
     bundle.name = frame.name;  // frame.frame_info.name_length is ignored here.
-    bundle.origin.x0 = frame.x0;
-    bundle.origin.y0 = frame.y0;
-
     JXL_ASSERT(io->metadata.m.color_encoding.IsGray() ==
                (frame.color.format.num_channels <= 2));
 
@@ -144,11 +145,13 @@ Status ConvertPackedPixelFileToCodecInOut(const PackedPixelFile& ppf,
         /*flipped_y=*/frame.color.flipped_y, pool, &bundle,
         /*float_in=*/float_in, /*align=*/0));
 
-    for (const auto& ppf_ec : frame.extra_channels) {
-      bundle.extra_channels().emplace_back(ppf_ec.xsize, ppf_ec.ysize);
+    bundle.extra_channels().resize(io->metadata.m.extra_channel_info.size());
+    for (size_t i = 0; i < frame.extra_channels.size(); i++) {
+      const auto& ppf_ec = frame.extra_channels[i];
+      bundle.extra_channels()[i] = ImageF(ppf_ec.xsize, ppf_ec.ysize);
       JXL_CHECK(BufferToImageF(ppf_ec.format, ppf_ec.xsize, ppf_ec.ysize,
                                ppf_ec.pixels(), ppf_ec.pixels_size, pool,
-                               &bundle.extra_channels().back()));
+                               &bundle.extra_channels()[i]));
     }
 
     io->frames.push_back(std::move(bundle));
