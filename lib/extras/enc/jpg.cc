@@ -69,7 +69,8 @@ void WriteICCProfile(jpeg_compress_struct* const cinfo,
     }
   }
 }
-void WriteExif(jpeg_compress_struct* const cinfo, const PaddedBytes& exif) {
+void WriteExif(jpeg_compress_struct* const cinfo,
+               const std::vector<uint8_t>& exif) {
   jpeg_write_m_header(
       cinfo, kExifMarker,
       static_cast<unsigned int>(exif.size() + sizeof kExifSignature));
@@ -130,7 +131,7 @@ Status EncodeWithLibJpeg(const ImageBundle* ib, const CodecInOut* io,
     WriteICCProfile(&cinfo, ib->c_current().ICC());
   }
   if (!io->blobs.exif.empty()) {
-    PaddedBytes exif(io->blobs.exif);
+    std::vector<uint8_t> exif = io->blobs.exif;
     ResetExifOrientation(exif);
     WriteExif(&cinfo, exif);
   }
@@ -174,7 +175,7 @@ Status EncodeWithSJpeg(const ImageBundle* ib, const CodecInOut* io,
     param.iccp.assign(ib->metadata()->color_encoding.ICC().begin(),
                       ib->metadata()->color_encoding.ICC().end());
   }
-  PaddedBytes exif(io->blobs.exif);
+  std::vector<uint8_t> exif = io->blobs.exif;
   if (!exif.empty()) {
     ResetExifOrientation(exif);
     param.exif.assign(exif.begin(), exif.end());
