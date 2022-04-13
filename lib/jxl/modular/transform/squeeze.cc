@@ -132,62 +132,61 @@ Status InvHSqueeze(Image &input, uint32_t c, uint32_t rc, ThreadPool *pool) {
   // Horizontal unsqueeze has horizontal data dependencies, so we do
   // 8 rows at a time and treat it as a vertical unsqueeze of a
   // transposed 8x8 block (or 9x8 for one input).
-  constexpr size_t kRowsPerThread = 8;
-  JXL_RETURN_IF_ERROR(RunOnPool(
-      pool, 0, DivCeil(chin.h, kRowsPerThread), ThreadPool::NoInit,
-      [&](const uint32_t task, size_t /* thread */) {
-        const size_t y0 = task * kRowsPerThread;
-        const size_t rows = std::min(kRowsPerThread, chin.h - y0);
-        size_t x = 0;
+  static constexpr const size_t kRowsPerThread = 8;
+  const auto unsqueeze_span = [&](const uint32_t task, size_t /* thread */) {
+    const size_t y0 = task * kRowsPerThread;
+    const size_t rows = std::min(kRowsPerThread, chin.h - y0);
+    size_t x = 0;
 
 #if HWY_TARGET != HWY_SCALAR
-        intptr_t onerow_in = chin.plane.PixelsPerRow();
-        intptr_t onerow_inr = chin_residual.plane.PixelsPerRow();
-        intptr_t onerow_out = chout.plane.PixelsPerRow();
-        const pixel_type *JXL_RESTRICT p_residual = chin_residual.Row(y0);
-        const pixel_type *JXL_RESTRICT p_avg = chin.Row(y0);
-        pixel_type *JXL_RESTRICT p_out = chout.Row(y0);
-        HWY_ALIGN pixel_type b_p_avg[9 * kRowsPerThread];
-        HWY_ALIGN pixel_type b_p_residual[8 * kRowsPerThread];
-        HWY_ALIGN pixel_type b_p_out_even[8 * kRowsPerThread];
-        HWY_ALIGN pixel_type b_p_out_odd[8 * kRowsPerThread];
-        HWY_ALIGN pixel_type b_p_out_evenT[8 * kRowsPerThread];
-        HWY_ALIGN pixel_type b_p_out_oddT[8 * kRowsPerThread];
-        const HWY_CAPPED(pixel_type, 8) d;
-        const size_t N = Lanes(d);
-        if (chin_residual.w > 16 && rows == kRowsPerThread) {
-          for (; x < chin_residual.w - 9; x += 8) {
-            Transpose8x8Block(p_residual + x, b_p_residual, onerow_inr);
-            Transpose8x8Block(p_avg + x, b_p_avg, onerow_in);
-            for (size_t y = 0; y < kRowsPerThread; y++) {
-              b_p_avg[8 * 8 + y] = p_avg[x + 8 + onerow_in * y];
-            }
-            for (size_t i = 0; i < 8; i++) {
-              FastUnsqueeze(b_p_residual + 8 * i, b_p_avg + 8 * i,
-                            b_p_avg + 8 * (i + 1),
-                            (x + i ? b_p_out_odd + 8 * ((x + i - 1) & 7)
-                                   : b_p_avg + 8 * i),
-                            b_p_out_even + 8 * i, b_p_out_odd + 8 * i);
-            }
+    intptr_t onerow_in = chin.plane.PixelsPerRow();
+    intptr_t onerow_inr = chin_residual.plane.PixelsPerRow();
+    intptr_t onerow_out = chout.plane.PixelsPerRow();
+    const pixel_type *JXL_RESTRICT p_residual = chin_residual.Row(y0);
+    const pixel_type *JXL_RESTRICT p_avg = chin.Row(y0);
+    pixel_type *JXL_RESTRICT p_out = chout.Row(y0);
+    HWY_ALIGN pixel_type b_p_avg[9 * kRowsPerThread];
+    HWY_ALIGN pixel_type b_p_residual[8 * kRowsPerThread];
+    HWY_ALIGN pixel_type b_p_out_even[8 * kRowsPerThread];
+    HWY_ALIGN pixel_type b_p_out_odd[8 * kRowsPerThread];
+    HWY_ALIGN pixel_type b_p_out_evenT[8 * kRowsPerThread];
+    HWY_ALIGN pixel_type b_p_out_oddT[8 * kRowsPerThread];
+    const HWY_CAPPED(pixel_type, 8) d;
+    const size_t N = Lanes(d);
+    if (chin_residual.w > 16 && rows == kRowsPerThread) {
+      for (; x < chin_residual.w - 9; x += 8) {
+        Transpose8x8Block(p_residual + x, b_p_residual, onerow_inr);
+        Transpose8x8Block(p_avg + x, b_p_avg, onerow_in);
+        for (size_t y = 0; y < kRowsPerThread; y++) {
+          b_p_avg[8 * 8 + y] = p_avg[x + 8 + onerow_in * y];
+        }
+        for (size_t i = 0; i < 8; i++) {
+          FastUnsqueeze(
+              b_p_residual + 8 * i, b_p_avg + 8 * i, b_p_avg + 8 * (i + 1),
+              (x + i ? b_p_out_odd + 8 * ((x + i - 1) & 7) : b_p_avg + 8 * i),
+              b_p_out_even + 8 * i, b_p_out_odd + 8 * i);
+        }
 
-            Transpose8x8Block(b_p_out_even, b_p_out_evenT, 8);
-            Transpose8x8Block(b_p_out_odd, b_p_out_oddT, 8);
-            for (size_t y = 0; y < kRowsPerThread; y++) {
-              for (size_t i = 0; i < kRowsPerThread; i += N) {
-                auto even = Load(d, b_p_out_evenT + 8 * y + i);
-                auto odd = Load(d, b_p_out_oddT + 8 * y + i);
-                StoreInterleaved(d, even, odd,
-                                 p_out + ((x + i) << 1) + onerow_out * y);
-              }
-            }
+        Transpose8x8Block(b_p_out_even, b_p_out_evenT, 8);
+        Transpose8x8Block(b_p_out_odd, b_p_out_oddT, 8);
+        for (size_t y = 0; y < kRowsPerThread; y++) {
+          for (size_t i = 0; i < kRowsPerThread; i += N) {
+            auto even = Load(d, b_p_out_evenT + 8 * y + i);
+            auto odd = Load(d, b_p_out_oddT + 8 * y + i);
+            StoreInterleaved(d, even, odd,
+                             p_out + ((x + i) << 1) + onerow_out * y);
           }
         }
+      }
+    }
 #endif
-        for (size_t y = 0; y < rows; y++) {
-          unsqueeze_row(y0 + y, x);
-        }
-      },
-      "InvHorizontalSqueeze"));
+    for (size_t y = 0; y < rows; y++) {
+      unsqueeze_row(y0 + y, x);
+    }
+  };
+  JXL_RETURN_IF_ERROR(RunOnPool(pool, 0, DivCeil(chin.h, kRowsPerThread),
+                                ThreadPool::NoInit, unsqueeze_span,
+                                "InvHorizontalSqueeze"));
   input.channel[c] = std::move(chout);
   return true;
 }
@@ -221,50 +220,49 @@ Status InvVSqueeze(Image &input, uint32_t c, uint32_t rc, ThreadPool *pool) {
     return true;
   }
 
-  constexpr int kColsPerThread = 64;
-  JXL_RETURN_IF_ERROR(RunOnPool(
-      pool, 0, DivCeil(chin.w, kColsPerThread), ThreadPool::NoInit,
-      [&](const uint32_t task, size_t /* thread */) {
-        const size_t x0 = task * kColsPerThread;
-        const size_t x1 = std::min((size_t)(task + 1) * kColsPerThread, chin.w);
-        const size_t w = x1 - x0;
-        // We only iterate up to std::min(chin_residual.h, chin.h) which is
-        // always chin_residual.h.
-        for (size_t y = 0; y < chin_residual.h; y++) {
-          const pixel_type *JXL_RESTRICT p_residual = chin_residual.Row(y) + x0;
-          const pixel_type *JXL_RESTRICT p_avg = chin.Row(y) + x0;
-          const pixel_type *JXL_RESTRICT p_navg =
-              chin.Row(y + 1 < chin.h ? y + 1 : y) + x0;
-          pixel_type *JXL_RESTRICT p_out = chout.Row(y << 1) + x0;
-          pixel_type *JXL_RESTRICT p_nout = chout.Row((y << 1) + 1) + x0;
-          const pixel_type *p_pout =
-              y > 0 ? chout.Row((y << 1) - 1) + x0 : p_avg;
-          size_t x = 0;
+  static constexpr const int kColsPerThread = 64;
+  const auto unsqueeze_slice = [&](const uint32_t task, size_t /* thread */) {
+    const size_t x0 = task * kColsPerThread;
+    const size_t x1 = std::min((size_t)(task + 1) * kColsPerThread, chin.w);
+    const size_t w = x1 - x0;
+    // We only iterate up to std::min(chin_residual.h, chin.h) which is
+    // always chin_residual.h.
+    for (size_t y = 0; y < chin_residual.h; y++) {
+      const pixel_type *JXL_RESTRICT p_residual = chin_residual.Row(y) + x0;
+      const pixel_type *JXL_RESTRICT p_avg = chin.Row(y) + x0;
+      const pixel_type *JXL_RESTRICT p_navg =
+          chin.Row(y + 1 < chin.h ? y + 1 : y) + x0;
+      pixel_type *JXL_RESTRICT p_out = chout.Row(y << 1) + x0;
+      pixel_type *JXL_RESTRICT p_nout = chout.Row((y << 1) + 1) + x0;
+      const pixel_type *p_pout = y > 0 ? chout.Row((y << 1) - 1) + x0 : p_avg;
+      size_t x = 0;
 #if HWY_TARGET != HWY_SCALAR
-          for (; x + 7 < w; x += 8) {
-            FastUnsqueeze(p_residual + x, p_avg + x, p_navg + x, p_pout + x,
-                          p_out + x, p_nout + x);
-          }
+      for (; x + 7 < w; x += 8) {
+        FastUnsqueeze(p_residual + x, p_avg + x, p_navg + x, p_pout + x,
+                      p_out + x, p_nout + x);
+      }
 #endif
-          for (; x < w; x++) {
-            pixel_type avg = p_avg[x];
-            pixel_type next_avg = p_navg[x];
-            pixel_type top = p_pout[x];
-            pixel_type tendency = SmoothTendency(top, avg, next_avg);
-            pixel_type diff_minus_tendency = p_residual[x];
-            pixel_type diff = diff_minus_tendency + tendency;
-            pixel_type out =
-                ((avg * 2) + diff + (diff < 0 ? (diff & 1) : -(diff & 1))) >> 1;
+      for (; x < w; x++) {
+        pixel_type avg = p_avg[x];
+        pixel_type next_avg = p_navg[x];
+        pixel_type top = p_pout[x];
+        pixel_type tendency = SmoothTendency(top, avg, next_avg);
+        pixel_type diff_minus_tendency = p_residual[x];
+        pixel_type diff = diff_minus_tendency + tendency;
+        pixel_type out =
+            ((avg * 2) + diff + (diff < 0 ? (diff & 1) : -(diff & 1))) >> 1;
 
-            p_out[x] = out;
-            // If the chin_residual.h == chin.h, the output has an even number
-            // of rows so the next line is fine. Otherwise, this loop won't
-            // write to the last output row which is handled separately.
-            p_nout[x] = out - diff;
-          }
-        }
-      },
-      "InvVertSqueeze"));
+        p_out[x] = out;
+        // If the chin_residual.h == chin.h, the output has an even number
+        // of rows so the next line is fine. Otherwise, this loop won't
+        // write to the last output row which is handled separately.
+        p_nout[x] = out - diff;
+      }
+    }
+  };
+  JXL_RETURN_IF_ERROR(RunOnPool(pool, 0, DivCeil(chin.w, kColsPerThread),
+                                ThreadPool::NoInit, unsqueeze_slice,
+                                "InvVertSqueeze"));
 
   if (chout.h & 1) {
     size_t y = chin.h - 1;
