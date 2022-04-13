@@ -356,6 +356,7 @@ endif()
 set(JPEGXL_INTERNAL_LIBS
   ${JPEGXL_DEC_INTERNAL_LIBS}
   brotlienc-static
+  Threads::Threads
   ${ATOMICS_LIBRARIES}
 )
 
