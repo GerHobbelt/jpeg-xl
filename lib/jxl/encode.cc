@@ -150,6 +150,10 @@ int VerifyLevelSettings(const JxlEncoder* enc, std::string* debug_string) {
 
   // Level 5 checks
 
+  if (!m.modular_16_bit_buffer_sufficient) {
+    if (debug_string) *debug_string = "Too high modular bit depth";
+    return 10;
+  }
   if (xsize > (1ull << 18ull) || ysize > (1ull << 18ull) ||
       xsize * ysize > (1ull << 28ull)) {
     if (debug_string) *debug_string = "Too large image dimensions";
@@ -429,9 +433,10 @@ JxlEncoderStatus JxlEncoderStruct::RefillOutputByteQueue() {
       for (size_t i = 0; i < 4; i++) {
         compressed[i] = static_cast<uint8_t>(box->type[i]);
       }
-      if (JXL_ENC_SUCCESS != BrotliCompress(brotli_effort, box->contents.data(),
-                                            box->contents.size(),
-                                            &compressed)) {
+      if (JXL_ENC_SUCCESS !=
+          BrotliCompress((brotli_effort >= 0 ? brotli_effort : 4),
+                         box->contents.data(), box->contents.size(),
+                         &compressed)) {
         return JXL_API_ERROR("Brotli compression for brob box failed");
       }
       jxl::AppendBoxHeader(jxl::MakeBoxType("brob"), compressed.size(), false,
@@ -567,7 +572,8 @@ JxlEncoderStatus JxlEncoderSetBasicInfo(JxlEncoder* enc,
   enc->metadata.m.bit_depth.floating_point_sample =
       (info->exponent_bits_per_sample != 0u);
   enc->metadata.m.modular_16_bit_buffer_sufficient =
-      (info->exponent_bits_per_sample == 0u) && info->bits_per_sample <= 12;
+      (!info->uses_original_profile || info->bits_per_sample <= 12) &&
+      info->alpha_bits <= 12;
 
   // The number of extra channels includes the alpha channel, so for example and
   // RGBA with no other extra channels, has exactly num_extra_channels == 1
@@ -626,7 +632,15 @@ JxlEncoderStatus JxlEncoderSetBasicInfo(JxlEncoder* enc,
     enc->metadata.m.animation.num_loops = info->animation.num_loops;
     enc->metadata.m.animation.have_timecodes = info->animation.have_timecodes;
   }
-
+  std::string level_message;
+  int required_level = VerifyLevelSettings(enc, &level_message);
+  if (required_level == -1 ||
+      static_cast<int>(enc->codestream_level) < required_level) {
+    return JXL_API_ERROR("%s", ("Codestream level verification for level " +
+                                std::to_string(enc->codestream_level) +
+                                " failed: " + level_message)
+                                   .c_str());
+  }
   return JXL_ENC_SUCCESS;
 }
 
@@ -658,6 +672,8 @@ JXL_EXPORT JxlEncoderStatus JxlEncoderSetExtraChannelInfo(
   jxl::ExtraChannelInfo& channel = enc->metadata.m.extra_channel_info[index];
   channel.type = static_cast<jxl::ExtraChannel>(info->type);
   channel.bit_depth.bits_per_sample = info->bits_per_sample;
+  enc->metadata.m.modular_16_bit_buffer_sufficient &=
+      info->bits_per_sample <= 12;
   channel.bit_depth.exponent_bits_per_sample = info->exponent_bits_per_sample;
   channel.bit_depth.floating_point_sample = info->exponent_bits_per_sample != 0;
   channel.dim_shift = info->dim_shift;
@@ -668,6 +684,15 @@ JXL_EXPORT JxlEncoderStatus JxlEncoderSetExtraChannelInfo(
   channel.spot_color[1] = info->spot_color[1];
   channel.spot_color[2] = info->spot_color[2];
   channel.spot_color[3] = info->spot_color[3];
+  std::string level_message;
+  int required_level = VerifyLevelSettings(enc, &level_message);
+  if (required_level == -1 ||
+      static_cast<int>(enc->codestream_level) < required_level) {
+    return JXL_API_ERROR("%s", ("Codestream level verification for level " +
+                                std::to_string(enc->codestream_level) +
+                                " failed: " + level_message)
+                                   .c_str());
+  }
   return JXL_ENC_SUCCESS;
 }
 
@@ -694,6 +719,7 @@ JxlEncoderFrameSettings* JxlEncoderFrameSettingsCreate(
   } else {
     opts->values.lossless = false;
   }
+  opts->values.cparams.level = enc->codestream_level;
   JxlEncoderFrameSettings* ret = opts.get();
   enc->encoder_options.emplace_back(std::move(opts));
   return ret;
@@ -782,7 +808,7 @@ JxlEncoderStatus JxlEncoderFrameSettingsSetOption(
           static_cast<jxl::SpeedTier>(10 - value);
       return JXL_ENC_SUCCESS;
     case JXL_ENC_FRAME_SETTING_BROTLI_EFFORT:
-      if (value < 0 || value > 11) {
+      if (value < -1 || value > 11) {
         return JXL_ENC_ERROR;
       }
       // set cparams for brotli use in JPEG frames
@@ -1153,9 +1179,8 @@ JxlEncoderStatus JxlEncoderAddJPEGFrame(
   if (frame_settings->enc->store_jpeg_metadata) {
     jxl::jpeg::JPEGData data_in = *io.Main().jpeg_data;
     jxl::PaddedBytes jpeg_data;
-    if (!jxl::jpeg::EncodeJPEGData(
-            data_in, &jpeg_data,
-            frame_settings->values.cparams.brotli_effort)) {
+    if (!jxl::jpeg::EncodeJPEGData(data_in, &jpeg_data,
+                                   frame_settings->values.cparams)) {
       return JXL_ENC_ERROR;
     }
     frame_settings->enc->jpeg_metadata = std::vector<uint8_t>(
@@ -1286,6 +1311,8 @@ JxlEncoderStatus JxlEncoderAddImageFrame(
   if (frame_settings->values.lossless) {
     queued_frame->option_values.cparams.SetLossless();
   }
+  queued_frame->option_values.cparams.level =
+      frame_settings->enc->codestream_level;
 
   QueueFrame(frame_settings, queued_frame);
   return JXL_ENC_SUCCESS;

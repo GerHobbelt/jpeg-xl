@@ -514,8 +514,9 @@ int main(int argc, const char** argv) {
                                      JXL_ENC_FRAME_SETTING_EFFORT, flag_effort);
 
     const int32_t flag_brotli_effort = FLAGS_brotli_effort;
-    if (!(0 <= flag_brotli_effort && flag_brotli_effort <= 11)) {
-      std::cerr << "Invalid --brotli_effort. Valid range is {0, 1, ..., 11}.\n";
+    if (!(-1 <= flag_brotli_effort && flag_brotli_effort <= 11)) {
+      std::cerr
+          << "Invalid --brotli_effort. Valid range is {-1, 0, 1, ..., 11}.\n";
       return EXIT_FAILURE;
     }
     JxlEncoderFrameSettingsSetOption(jxl_encoder_frame_settings,

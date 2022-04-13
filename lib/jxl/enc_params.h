@@ -127,7 +127,7 @@ struct CompressParams {
   float max_error[3] = {0.0, 0.0, 0.0};
 
   SpeedTier speed_tier = SpeedTier::kSquirrel;
-  size_t brotli_effort = 9;
+  int brotli_effort = -1;
 
   // 0 = default.
   // 1 = slightly worse quality.
@@ -255,6 +255,10 @@ struct CompressParams {
   int ec_resampling = -1;
   // Skip the downsampling before encoding if this is true.
   bool already_downsampled = false;
+
+  // Codestream level to conform to.
+  // -1: don't care
+  int level = -1;
 
   std::vector<float> manual_noise;
   std::vector<float> manual_xyb_factors;

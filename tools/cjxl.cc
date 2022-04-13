@@ -347,6 +347,12 @@ void CompressArgs::AddCommandLineOptions(CommandLineParser* cmdline) {
       "    Default: 7. Higher number is more effort (slower).",
       &params.speed_tier, &ParseSpeedTier);
 
+  cmdline->AddOptionValue('\0', "brotli_effort", "B_EFFORT",
+                          "Brotli effort setting. Range: 0 .. 11.\n"
+                          "    Default: -1 (based on EFFORT). Higher number is "
+                          "more effort (slower).",
+                          &params.brotli_effort, &ParseSigned, -1);
+
   cmdline->AddOptionValue(
       '\0', "brotli_effort", "EFFORT",
       "Brotli effort setting. Range: 1 .. 11.\n"
