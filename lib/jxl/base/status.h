@@ -75,13 +75,7 @@ namespace jxl {
 // instead of calling Debug directly. This function returns false, so it can be
 // used as a return value in JXL_FAILURE.
 JXL_FORMAT(1, 2)
-inline JXL_NOINLINE bool Debug(const char* format, ...) {
-  va_list args;
-  va_start(args, format);
-  vfprintf(stderr, format, args);
-  va_end(args);
-  return false;
-}
+bool Debug(const char* format, ...);
 
 // Print a debug message on standard error if "enabled" is true. "enabled" is
 // normally a macro that evaluates to 0 or 1 at compile time, so the Debug
@@ -124,21 +118,7 @@ inline JXL_NOINLINE bool Debug(const char* format, ...) {
   JXL_DEBUG(JXL_DEBUG_WARNING, format, ##__VA_ARGS__)
 
 // Exits the program after printing a stack trace when possible.
-JXL_NORETURN inline JXL_NOINLINE void Abort() {
-#if JXL_ADDRESS_SANITIZER || JXL_MEMORY_SANITIZER || JXL_THREAD_SANITIZER
-  // If compiled with any sanitizer print a stack trace. This call doesn't crash
-  // the program, instead the trap below will crash it also allowing gdb to
-  // break there.
-  __sanitizer_print_stack_trace();
-#endif  // *_SANITIZER)
-
-#if JXL_COMPILER_MSVC
-  __debugbreak();
-  abort();
-#else
-  __builtin_trap();
-#endif
-}
+JXL_NORETURN void Abort();
 
 // Exits the program after printing file/line plus a formatted string.
 #define JXL_ABORT(format, ...)                                              \
