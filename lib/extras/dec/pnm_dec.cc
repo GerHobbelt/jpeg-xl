@@ -276,7 +276,12 @@ class Parser {
     // indicate endianness. All software expects nominal range 0..1.
     double scale;
     JXL_RETURN_IF_ERROR(ParseSigned(&scale));
-    header->big_endian = scale >= 0.0;
+    if (scale == 0.0) {
+      return JXL_FAILURE("PFM: bad scale factor value.");
+    } else if (std::abs(scale) != 1.0) {
+      JXL_WARNING("PFM: Discarding non-unit scale factor");
+    }
+    header->big_endian = scale > 0.0;
     header->bits_per_sample = 32;
     header->floating_point = true;
 
@@ -363,6 +368,7 @@ Status DecodeImagePNM(const Span<const uint8_t> bytes,
   ppf->frames.emplace_back(header.xsize, header.ysize, format);
   auto* frame = &ppf->frames.back();
 
+  frame->color.bitdepth_from_format = false;
   frame->color.flipped_y = header.bits_per_sample == 32;  // PFMs are flipped
   size_t pnm_remaining_size = bytes.data() + bytes.size() - pos;
   if (pnm_remaining_size < frame->color.pixels_size) {
