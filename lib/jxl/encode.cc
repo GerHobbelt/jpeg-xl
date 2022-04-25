@@ -1058,9 +1058,10 @@ void JxlEncoderReset(JxlEncoder* enc) {
 
 void JxlEncoderDestroy(JxlEncoder* enc) {
   if (enc) {
+    JxlMemoryManager local_memory_manager = enc->memory_manager;
     // Call destructor directly since custom free function is used.
     enc->~JxlEncoder();
-    jxl::MemoryManagerFree(&enc->memory_manager, enc);
+    jxl::MemoryManagerFree(&local_memory_manager, enc);
   }
 }
 
