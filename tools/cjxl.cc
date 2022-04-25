@@ -267,12 +267,6 @@ void CompressArgs::AddCommandLineOptions(CommandLineParser* cmdline) {
                           &params.brotli_effort, &ParseSigned, -1);
 
   cmdline->AddOptionValue(
-      '\0', "brotli_effort", "EFFORT",
-      "Brotli effort setting. Range: 1 .. 11.\n"
-      "    Default: 9. Higher number is more effort (slower).",
-      &params.brotli_effort, &ParseUnsigned, 1);
-
-  cmdline->AddOptionValue(
       's', "speed", "ANIMAL",
       "Deprecated synonym for --effort. Valid values are:\n"
       "    lightning (1), thunder, falcon, cheetah, hare, wombat, squirrel, "
