@@ -877,7 +877,7 @@ void ProcessImageArea(const unsigned char* rgba, size_t x0, size_t y0,
     return p;
   };
 
-  for (size_t i = 0; i < nb_chans; i++) allone[i] = 0xffff;
+  for (size_t i = 0; i < nb_chans; i++) allone[i] = (int16_t)0xffff;
   for (size_t y = 0; y < ys; y++) {
     // Pre-fill rows with YCoCg converted pixels.
     for (size_t x = 0; x < oxs; x++) {

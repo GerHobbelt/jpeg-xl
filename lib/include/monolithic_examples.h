@@ -28,7 +28,6 @@ extern int jpegXL_generate_LUT_template_main(int argc, const char** argv);
 extern int jpegXL_pq_to_hlg_main(int argc, const char** argv);
 extern int jpegXL_render_hlg_main(int argc, const char** argv);
 extern int jpegXL_texture_to_cube_main(int argc, const char** argv);
-extern int jpegXL_add_noise_main(int argc, const char** argv);
 
 #ifdef __cplusplus
 }

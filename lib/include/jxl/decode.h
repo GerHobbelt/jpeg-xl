@@ -1228,20 +1228,6 @@ JXL_EXPORT JxlDecoderStatus JxlDecoderGetBoxSizeRaw(const JxlDecoder* dec,
                                                     uint64_t* size);
 
 /**
- * Configures at which progressive steps in frame decoding the @ref
- * JXL_DEC_FRAME_PROGRESSION event occurs. By default, this is 0. The detail
- * values mean: 0 = only trigger for the DC image, the 8x8th lower resolution
- * image. 1 = also trigger when a full pass of groups is ready. Higher values
- * indicate more steps but are not yet implemented. Higher values always include
- * the events of lower values as well.
- *
- * @param dec decoder object
- * @param detail at which level of detail to trigger JXL_DEC_FRAME_PROGRESSION
- */
-JXL_EXPORT void JxlDecoderSetProgressiveDetail(JxlDecoder* dec,
-                                               uint32_t detail);
-
-/**
  * Outputs progressive step towards the decoded image so far when only partial
  * input was received. If the flush was successful, the buffer set with
  * JxlDecoderSetImageOutBuffer will contain partial image data.
