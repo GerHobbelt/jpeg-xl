@@ -533,11 +533,11 @@ TEST(DecodeTest, CustomAllocTest) {
 
   JxlMemoryManager mm;
   mm.opaque = &counters;
-  mm.alloc = [](void* opaque, size_t size) {
+  mm._alloc = [](void* opaque, size_t size) {
     reinterpret_cast<CalledCounters*>(opaque)->allocs++;
     return malloc(size);
   };
-  mm.free = [](void* opaque, void* address) {
+  mm._free = [](void* opaque, void* address) {
     reinterpret_cast<CalledCounters*>(opaque)->frees++;
     free(address);
   };

@@ -133,11 +133,11 @@ TEST(EncodeTest, CustomAllocTest) {
 
   JxlMemoryManager mm;
   mm.opaque = &counters;
-  mm.alloc = [](void* opaque, size_t size) {
+  mm._alloc = [](void* opaque, size_t size) {
     reinterpret_cast<CalledCounters*>(opaque)->allocs++;
     return malloc(size);
   };
-  mm.free = [](void* opaque, void* address) {
+  mm._free = [](void* opaque, void* address) {
     reinterpret_cast<CalledCounters*>(opaque)->frees++;
     free(address);
   };
@@ -209,12 +209,13 @@ void VerifyFrameEncoding(size_t xsize, size_t ysize, JxlEncoder* enc,
       &decoded_io, /*pool=*/nullptr));
 
   EXPECT_LE(
-      ComputeDistance2(input_io.Main(), decoded_io.Main(), jxl::GetJxlCms()),
+	  ComputeDistance2(input_io.Main(), decoded_io.Main(), jxl::GetJxlCms()),
 #if JXL_HIGH_PRECISION
-      1.8);
+	  1.8
 #else
-      4.8);
+	  4.8
 #endif
+  );
 }
 
 void VerifyFrameEncoding(JxlEncoder* enc,

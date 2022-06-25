@@ -10,6 +10,8 @@
 #include <chrono>
 #include <thread>
 
+#ifdef HAVE_LODEPNG
+
 #include "fast_lossless.h"
 #include "pam-input.h"
 
@@ -83,3 +85,5 @@ int main(int argc, const char** argv) {
   }
   fclose(o);
 }
+
+#endif

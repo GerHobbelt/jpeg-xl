@@ -14,10 +14,18 @@
 
 #include "lib/jxl/base/file_io.h"
 
+#ifndef JPEGXL_TEST_DATA_PATH
+#ifdef TEST_DATA_PATH
+#define JPEGXL_TEST_DATA_PATH     TEST_DATA_PATH
+#else
+#define JPEGXL_TEST_DATA_PATH     "./jpeg-xl/testdata"
+#endif
+#endif
+
 namespace jxl {
 
 static inline PaddedBytes ReadTestData(const std::string& filename) {
-  std::string full_path = std::string(TEST_DATA_PATH "/") + filename;
+  std::string full_path = std::string(JPEGXL_TEST_DATA_PATH "/") + filename;
   PaddedBytes data;
   bool ok = ReadFile(full_path, &data);
 #ifdef __EMSCRIPTEN__
