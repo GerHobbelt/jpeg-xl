@@ -9,7 +9,6 @@ extern "C" {
 
 extern int jpegXL_box_list_main(int argc, const char** argv);
 extern int jpegXL_butteraugli_main(int argc, const char** argv);
-extern int jpegXL_C_test_main(int argc, const char** argv);
 extern int jpegXL_compress_main(int argc, const char** argv);
 extern int jpegXL_cjpeg_hdr_main(int argc, const char** argv);
 extern int jpegXL_conformance_main(int argc, const char** argv);
