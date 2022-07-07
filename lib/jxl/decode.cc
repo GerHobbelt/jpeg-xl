@@ -509,6 +509,7 @@ struct JxlDecoderStruct {
   // set to nullptr.
   bool preview_out_buffer_set;
   // Idem for the image buffer.
+  // Set to true if either an image out buffer or an image out callback was set.
   bool image_out_buffer_set;
 
   // Owned by the caller, buffers for DC image and full resolution images
@@ -597,6 +598,9 @@ struct JxlDecoderStruct {
   // all bytes at once, to save memory. Find alternative to std::vector doubling
   // strategy to prevent some memory usage.
   std::vector<uint8_t> codestream_copy;
+  // Number of bytes at the end of codestream_copy that were not yet consumed
+  // by calling AdvanceInput().
+  size_t codestream_unconsumed;
   // Position in the actual codestream, which codestream_copy.begin() points to.
   // Non-zero once earlier parts of the codestream vector have been erased.
   // TODO(lode): use this variable to allow pruning codestream_copy
@@ -753,6 +757,7 @@ void JxlDecoderRewindDecodingState(JxlDecoder* dec) {
   dec->frame_header.reset(new jxl::FrameHeader(&dec->metadata));
 
   dec->codestream_copy.clear();
+  dec->codestream_unconsumed = 0;
 
   dec->frame_stage = FrameStage::kHeader;
   dec->frame_start = 0;
@@ -1911,6 +1916,18 @@ static JxlDecoderStatus HandleBoxes(JxlDecoder* dec) {
         return JXL_DEC_NEED_MORE_INPUT;
       }
 
+      bool boxed_codestream_done =
+          ((dec->events_wanted & JXL_DEC_BOX) &&
+           dec->stage == DecoderStage::kCodestreamFinished &&
+           dec->last_codestream_seen && !dec->JbrdNeedMoreBoxes());
+      if (boxed_codestream_done && dec->avail_in >= 2 &&
+          dec->next_in[0] == 0xff &&
+          dec->next_in[1] == jxl::kCodestreamMarker) {
+        // We detected the start of the next naked codestream, so we can return
+        // success here.
+        return JXL_DEC_SUCCESS;
+      }
+
       uint64_t box_size, header_size;
       JxlDecoderStatus status =
           ParseBoxHeader(dec->next_in, dec->avail_in, 0, dec->file_pos,
@@ -1937,6 +1954,11 @@ static JxlDecoderStatus HandleBoxes(JxlDecoder* dec) {
       // The signature box at box_count == 1 is not checked here since that's
       // already done at the beginning.
       dec->box_count++;
+      if (boxed_codestream_done && memcmp(dec->box_type, "JXL ", 4) == 0) {
+        // We detected the start of the next boxed stream, so we can return
+        // success here.
+        return JXL_DEC_SUCCESS;
+      }
       if (dec->box_count == 2 && memcmp(dec->box_type, "ftyp", 4) != 0) {
         return JXL_API_ERROR("the second box must be the ftyp box");
       }
@@ -2045,9 +2067,10 @@ static JxlDecoderStatus HandleBoxes(JxlDecoder* dec) {
       if (have_copy) {
         // TODO(lode): prune the codestream_copy vector if the codestream
         // decoder no longer needs data from previous frames.
-        dec->codestream_copy.insert(dec->codestream_copy.end(), dec->next_in,
+        dec->codestream_copy.insert(dec->codestream_copy.end(),
+                                    dec->next_in + dec->codestream_unconsumed,
                                     dec->next_in + avail_codestream);
-        dec->AdvanceInput(avail_codestream);
+        dec->codestream_unconsumed = avail_codestream;
         avail_codestream = dec->codestream_copy.size();
       }
 
@@ -2062,7 +2085,10 @@ static JxlDecoderStatus HandleBoxes(JxlDecoder* dec) {
         }
       }
       if (status == JXL_DEC_NEED_MORE_INPUT) {
-        if (!have_copy) {
+        if (have_copy) {
+          dec->AdvanceInput(dec->codestream_unconsumed);
+          dec->codestream_unconsumed = 0;
+        } else {
           dec->codestream_copy.insert(dec->codestream_copy.end(), dec->next_in,
                                       dec->next_in + avail_codestream);
           dec->AdvanceInput(avail_codestream);
@@ -2081,7 +2107,9 @@ static JxlDecoderStatus HandleBoxes(JxlDecoder* dec) {
         }
         if (dec->box_contents_unbounded) {
           // Last box reached and codestream done, nothing more to do.
-          dec->AdvanceInput(dec->avail_in);
+          size_t codestream_consumed =
+              dec->codestream_copy.size() - dec->codestream_unconsumed;
+          dec->AdvanceInput(dec->frame_start - codestream_consumed);
           break;
         }
         if (dec->events_wanted & JXL_DEC_BOX) {
@@ -2099,8 +2127,10 @@ static JxlDecoderStatus HandleBoxes(JxlDecoder* dec) {
           continue;
         } else {
           // Codestream decoded, and no box output requested, skip all further
-          // input and return success.
-          dec->AdvanceInput(dec->avail_in);
+          // input until the end of the box and return success.
+          size_t remaining = dec->box_contents_end - dec->file_pos;
+          size_t to_skip = std::min<size_t>(remaining, dec->avail_in);
+          dec->AdvanceInput(to_skip);
           break;
         }
       }
@@ -2492,7 +2522,7 @@ JxlDecoderStatus PrepareSizeCheck(const JxlDecoder* dec,
 }  // namespace
 
 JxlDecoderStatus JxlDecoderFlushImage(JxlDecoder* dec) {
-  if (!dec->image_out_buffer) return JXL_DEC_ERROR;
+  if (!dec->image_out_buffer_set) return JXL_DEC_ERROR;
   if (!dec->sections || dec->sections->section_info.empty()) {
     return JXL_DEC_ERROR;
   }
@@ -2528,7 +2558,9 @@ JxlDecoderStatus JxlDecoderFlushImage(JxlDecoder* dec) {
       dec, *dec->ib, dec->image_out_format,
       /*want_extra_channel=*/false,
       /*extra_channel_index=*/0, dec->image_out_buffer, dec->image_out_size,
-      /*out_callback=*/{});
+      jxl::PixelCallback{
+          dec->image_out_init_callback, dec->image_out_run_callback,
+          dec->image_out_destroy_callback, dec->image_out_init_opaque});
   dec->ib->ShrinkTo(xsize, ysize);
   if (status != JXL_DEC_SUCCESS) return status;
   return JXL_DEC_SUCCESS;
