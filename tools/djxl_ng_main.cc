@@ -40,20 +40,8 @@ DEFINE_int64(num_threads, 0,
 
 DEFINE_int32(bits_per_sample, 0, "0 = original (input) bit depth");
 
-// TODO(firsching): wire this up.
-DEFINE_bool(
-    tone_map, true,
-    "tone map the image to the luminance range indicated by --display_nits "
-    "instead of performing a naive 0-1 -> 0-1 conversion");
-
-// TODO(firsching): wire this up.
-DEFINE_string(display_nits, "0.f-255.",
-              "luminance range of the display to which to "
-              "tone-map; the lower bound can be omitted");
-
-// TODO(firsching): wire this up.
-DEFINE_double(preserve_saturation, 0.1,
-              "with --tone_map, how much to favor saturation over luminance");
+DEFINE_double(display_nits, 0.,
+              "tone map the image to the peak display luminance given");
 
 // TODO(firsching): wire this up; consider making empty string the default.
 DEFINE_string(color_space, "RGB_D65_SRG_Rel_Lin",
@@ -65,7 +53,6 @@ DEFINE_uint32(downsampling, 0,
               "progressive passes that are not needed to produce a partially "
               "decoded image intended for this downsampling ratio.");
 
-// TODO(firsching): wire this up.
 DEFINE_bool(allow_partial_files, false, "allow decoding of truncated files");
 
 #if JPEGXL_ENABLE_JPEG
@@ -260,6 +247,12 @@ static bool DecompressJxlToPackedPixelFile(
     fprintf(stderr, "Decoder failed to set input\n");
     return false;
   }
+  if (FLAGS_display_nits > 0 &&
+      JXL_DEC_SUCCESS !=
+          JxlDecoderSetDesiredIntensityTarget(dec, FLAGS_display_nits)) {
+    fprintf(stderr, "Decoder failed to set desired intensity target\n");
+    return EXIT_FAILURE;
+  }
   // TODO(firsching): handle boxes as well (exif, iptc, jumbf and xmp).
   bool is_last_frame = false;
   for (;;) {
@@ -268,7 +261,18 @@ static bool DecompressJxlToPackedPixelFile(
       fprintf(stderr, "Failed to decode image\n");
       return false;
     } else if (status == JXL_DEC_NEED_MORE_INPUT) {
-      fprintf(stderr, "Error, already provided all input\n");
+      if (FLAGS_allow_partial_files) {
+        if (JXL_DEC_SUCCESS != JxlDecoderFlushImage(dec)) {
+          fprintf(stderr,
+                  "Input file is truncated and there is no preview "
+                  "available yet.\n");
+          return false;
+        }
+        break;
+      }
+      fprintf(stderr,
+              "Input file is truncated and --allow_partial_files was "
+              "not used\n");
       return false;
     } else if (status == JXL_DEC_BASIC_INFO) {
       if (JXL_DEC_SUCCESS != JxlDecoderGetBasicInfo(dec, &ppf->info)) {

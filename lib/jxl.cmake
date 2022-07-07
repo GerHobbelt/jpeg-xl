@@ -93,6 +93,7 @@ set(JPEGXL_INTERNAL_SOURCES_DEC
   jxl/dec_params.h
   jxl/dec_patch_dictionary.cc
   jxl/dec_patch_dictionary.h
+  jxl/dec_tone_mapping-inl.h
   jxl/dec_transforms-inl.h
   jxl/dec_xyb-inl.h
   jxl/dec_xyb.cc
@@ -198,6 +199,8 @@ set(JPEGXL_INTERNAL_SOURCES_DEC
   jxl/render_pipeline/stage_chroma_upsampling.h
   jxl/render_pipeline/stage_epf.cc
   jxl/render_pipeline/stage_epf.h
+  jxl/render_pipeline/stage_from_linear.cc
+  jxl/render_pipeline/stage_from_linear.h
   jxl/render_pipeline/stage_gaborish.cc
   jxl/render_pipeline/stage_gaborish.h
   jxl/render_pipeline/stage_noise.cc
@@ -208,6 +211,10 @@ set(JPEGXL_INTERNAL_SOURCES_DEC
   jxl/render_pipeline/stage_splines.h
   jxl/render_pipeline/stage_spot.cc
   jxl/render_pipeline/stage_spot.h
+  jxl/render_pipeline/stage_to_linear.cc
+  jxl/render_pipeline/stage_to_linear.h
+  jxl/render_pipeline/stage_tone_mapping.cc
+  jxl/render_pipeline/stage_tone_mapping.h
   jxl/render_pipeline/stage_upsampling.cc
   jxl/render_pipeline/stage_upsampling.h
   jxl/render_pipeline/stage_write.cc

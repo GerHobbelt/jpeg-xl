@@ -189,6 +189,9 @@ typedef enum {
    * "JxlDecoderProcessInput": User extensions of the codestream header. This
    * event occurs max once per image and always later than @ref
    * JXL_DEC_BASIC_INFO and earlier than any pixel data.
+   *
+   * @deprecated The decoder no longer returns this, the header extensions,
+   * if any, are available at the JXL_DEC_BASIC_INFO event.
    */
   JXL_DEC_EXTENSIONS = 0x80,
 
@@ -519,8 +522,6 @@ JXL_EXPORT JxlDecoderStatus JxlDecoderSetCoalescing(JxlDecoder* dec,
  * @return @ref JXL_DEC_NEED_MORE_INPUT when more input data is necessary.
  * @return @ref JXL_DEC_BASIC_INFO when basic info such as image dimensions is
  *     available and this informative event is subscribed to.
- * @return @ref JXL_DEC_EXTENSIONS when JPEG XL codestream user extensions are
- *     available and this informative event is subscribed to.
  * @return @ref JXL_DEC_COLOR_ENCODING when color profile information is
  *     available and this informative event is subscribed to.
  * @return @ref JXL_DEC_PREVIEW_IMAGE when preview pixel information is
@@ -785,6 +786,19 @@ JXL_EXPORT JxlDecoderStatus JxlDecoderGetColorAsICCProfile(
  */
 JXL_EXPORT JxlDecoderStatus JxlDecoderSetPreferredColorProfile(
     JxlDecoder* dec, const JxlColorEncoding* color_encoding);
+
+/** Requests that the decoder perform tone mapping to the peak display luminance
+ * passed as @c desired_intensity_target, if appropriate.
+ * @note This is provided for convenience and the exact tone mapping that is
+ * performed is not meant to be considered authoritative in any way. It may
+ * change from version to version.
+ * @param dec decoder object
+ * @param desired_intensity_target the intended target peak luminance
+ * @return @ref JXL_DEC_SUCCESS if the preference was set successfully, @ref
+ * JXL_DEC_ERROR otherwise.
+ */
+JXL_EXPORT JxlDecoderStatus JxlDecoderSetDesiredIntensityTarget(
+    JxlDecoder* dec, float desired_intensity_target);
 
 /**
  * Returns the minimum size in bytes of the preview image output pixel buffer
