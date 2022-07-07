@@ -215,13 +215,16 @@ void VerifyFrameEncoding(size_t xsize, size_t ysize, JxlEncoder* enc,
       {}, jxl::Span<const uint8_t>(compressed.data(), compressed.size()),
       &decoded_io, /*pool=*/nullptr));
 
-  EXPECT_LE(
-	  ComputeDistance2(input_io.Main(), decoded_io.Main(), jxl::GetJxlCms()),
+  const double expected_distance =
 #if JXL_HIGH_PRECISION
 	  1.8
 #else
 	  4.8
 #endif
+	  ;
+  EXPECT_LE(
+	  ComputeDistance2(input_io.Main(), decoded_io.Main(), jxl::GetJxlCms()),
+      expected_distance
   );
 }
 
