@@ -510,7 +510,7 @@ target_compile_definitions(jxl_dec-static INTERFACE -DJXL_EXPORT=)
 
 # TODO(deymo): Move TCMalloc linkage to the tools/ directory since the library
 # shouldn't do any allocs anyway.
-if(${JPEGXL_ENABLE_TCMALLOC})
+if(JPEGXL_ENABLE_TCMALLOC)
   pkg_check_modules(TCMallocMinimal REQUIRED IMPORTED_TARGET
       libtcmalloc_minimal)
   # tcmalloc 2.8 has concurrency issues that makes it sometimes return nullptr
@@ -537,8 +537,7 @@ endif()
 install(TARGETS jxl-static DESTINATION ${CMAKE_INSTALL_LIBDIR})
 install(TARGETS jxl_dec-static DESTINATION ${CMAKE_INSTALL_LIBDIR})
 
-if (((NOT DEFINED "${TARGET_SUPPORTS_SHARED_LIBS}") OR
-     TARGET_SUPPORTS_SHARED_LIBS) AND NOT JPEGXL_STATIC AND BUILD_SHARED_LIBS)
+if (BUILD_SHARED_LIBS)
 
 # Public shared library.
 add_library(jxl SHARED ${JPEGXL_INTERNAL_OBJECTS})
@@ -595,7 +594,7 @@ foreach(target IN ITEMS jxl jxl_dec)
   # This hides the default visibility symbols from static libraries bundled into
   # the shared library. In particular this prevents exposing symbols from hwy
   # and skcms in the shared library.
-  if(${LINKER_SUPPORT_EXCLUDE_LIBS})
+  if(LINKER_SUPPORT_EXCLUDE_LIBS)
     set_property(TARGET ${target} APPEND_STRING PROPERTY
         LINK_FLAGS " ${LINKER_EXCLUDE_LIBS_FLAG}")
   endif()
@@ -611,8 +610,7 @@ install(TARGETS jxl
 else()
 add_library(jxl ALIAS jxl-static)
 add_library(jxl_dec ALIAS jxl_dec-static)
-endif()  # TARGET_SUPPORTS_SHARED_LIBS AND NOT JPEGXL_STATIC AND
-         # BUILD_SHARED_LIBS
+endif()  # BUILD_SHARED_LIBS
 
 # Add a pkg-config file for libjxl.
 set(JPEGXL_LIBRARY_REQUIRES

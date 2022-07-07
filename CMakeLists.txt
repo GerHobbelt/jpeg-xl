@@ -51,12 +51,12 @@ if(CHECK_PIE_SUPPORTED)
 endif()
 
 ### Project build options:
-if(${CXX_FUZZERS_SUPPORTED})
+if(CXX_FUZZERS_SUPPORTED)
   # Enabled by default except on arm64, Windows and Apple builds.
   set(ENABLE_FUZZERS_DEFAULT true)
 endif()
 find_package(PkgConfig)
-if(NOT APPLE AND NOT WIN32 AND NOT HAIKU AND ${CMAKE_SYSTEM_PROCESSOR} MATCHES "x86_64")
+if(NOT APPLE AND NOT WIN32 AND NOT HAIKU AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
   pkg_check_modules(TCMallocMinimalVersionCheck QUIET IMPORTED_TARGET
       libtcmalloc_minimal)
   if(TCMallocMinimalVersionCheck_FOUND AND
@@ -83,7 +83,8 @@ else()
 endif()
 
 # Standard cmake naming for building shared libraries.
-option(BUILD_SHARED_LIBS "Build shared libraries instead of static ones" ON)
+get_property(SHARED_LIBS_SUPPORTED GLOBAL PROPERTY TARGET_SUPPORTS_SHARED_LIBS)
+option(BUILD_SHARED_LIBS "Build shared libraries instead of static ones" ${SHARED_LIBS_SUPPORTED})
 
 set(JPEGXL_ENABLE_FUZZERS ${ENABLE_FUZZERS_DEFAULT} CACHE BOOL
     "Build JPEGXL fuzzer targets.")
@@ -149,20 +150,20 @@ set(JPEGXL_FORCE_SYSTEM_HWY false CACHE BOOL
 
 # Check minimum compiler versions. Older compilers are not supported and fail
 # with hard to understand errors.
-if (NOT ${CMAKE_C_COMPILER_ID} STREQUAL ${CMAKE_CXX_COMPILER_ID})
+if (NOT CMAKE_C_COMPILER_ID STREQUAL CMAKE_CXX_COMPILER_ID)
   message(FATAL_ERROR "Different C/C++ compilers set: "
           "${CMAKE_C_COMPILER_ID} vs ${CMAKE_CXX_COMPILER_ID}")
 endif()
-if (${CMAKE_CXX_COMPILER_ID} MATCHES "Clang")
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   # Android NDK's toolchain.cmake fakes the clang version in
   # CMAKE_CXX_COMPILER_VERSION with an incorrect number, so ignore this.
-  if (NOT ${CMAKE_ANDROID_NDK_TOOLCHAIN_VERSION} MATCHES "clang"
-      AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_LESS 6)
+  if (NOT CMAKE_ANDROID_NDK_TOOLCHAIN_VERSION MATCHES "clang"
+      AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 5)
     message(FATAL_ERROR
-      "Minimum Clang version required is Clang 6, please update.")
+      "Minimum Clang version required is Clang 5, please update.")
   endif()
-elseif (${CMAKE_CXX_COMPILER_ID} MATCHES "GNU")
-  if (${CMAKE_CXX_COMPILER_VERSION} VERSION_LESS 7)
+elseif (CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+  if (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7)
     message(FATAL_ERROR
       "Minimum GCC version required is 7, please update.")
   endif()
@@ -240,7 +241,7 @@ if (JPEGXL_EMSCRIPTEN)
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -pthread")
 endif()
 
-if ("${CXX_MACRO_PREFIX_MAP}")
+if (CXX_MACRO_PREFIX_MAP)
   add_compile_options(-fmacro-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}=.)
 endif()
 
@@ -271,10 +272,10 @@ endif()
 
 # Machine flags.
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -funwind-tables")
-if (${CMAKE_CXX_COMPILER_ID} MATCHES "Clang")
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Xclang -mrelax-all")
 endif()
-if ("${CXX_CONSTRUCTOR_ALIASES_SUPPORTED}")
+if (CXX_CONSTRUCTOR_ALIASES_SUPPORTED)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Xclang -mconstructor-aliases")
 endif()
 
@@ -287,7 +288,7 @@ endif()
 # CPU flags - remove once we have NEON dynamic dispatch
 
 # TODO(janwas): this also matches M1, but only ARMv7 is intended/needed.
-if(${CMAKE_SYSTEM_PROCESSOR} MATCHES "arm")
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm")
 if(JPEGXL_FORCE_NEON)
 # GCC requires these flags, otherwise __ARM_NEON is undefined.
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} \
@@ -388,7 +389,7 @@ endif() # JPEGXL_ENABLE_DOXYGEN
 
 if(JPEGXL_ENABLE_MANPAGES)
 find_program(ASCIIDOC a2x)
-if(NOT "${ASCIIDOC}" STREQUAL "ASCIIDOC-NOTFOUND")
+if(ASCIIDOC)
 file(STRINGS "${ASCIIDOC}" ASCIIDOC_SHEBANG LIMIT_COUNT 1)
 if(ASCIIDOC_SHEBANG MATCHES "/sh|/bash")
   set(ASCIIDOC_PY_FOUND ON)
@@ -407,7 +408,7 @@ else()
   find_package(Python COMPONENTS Interpreter QUIET)
   if(NOT Python_Interpreter_FOUND)
     find_program(ASCIIDOC_PY python)
-    if(NOT ASCIIDOC_PY STREQUAL "ASCIIDOC_PY-NOTFOUND")
+    if(ASCIIDOC_PY)
       set(ASCIIDOC_PY_FOUND ON)
     endif()
   else()
@@ -438,16 +439,16 @@ if (ASCIIDOC_PY_FOUND)
 endif()  # ASCIIDOC_PY_FOUND
 else()
   message(WARNING "asciidoc was not found, the man pages will not be installed.")
-endif()  # ASCIIDOC != "ASCIIDOC-NOTFOUND"
+endif()  # ASCIIDOC
 endif()  # JPEGXL_ENABLE_MANPAGES
 
 # Example usage code.
-if (${JPEGXL_ENABLE_EXAMPLES})
+if (JPEGXL_ENABLE_EXAMPLES)
 include(examples/examples.cmake)
 endif ()
 
 # Plugins for third-party software
-if (${JPEGXL_ENABLE_PLUGINS})
+if (JPEGXL_ENABLE_PLUGINS)
 add_subdirectory(plugins)
 endif ()
 

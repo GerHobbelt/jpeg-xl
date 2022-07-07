@@ -168,7 +168,7 @@ if (OpenEXR_FOUND)
   # Actually those flags counteract the ones set in JPEGXL_INTERNAL_FLAGS.
   if (NOT WIN32)
     set_source_files_properties(extras/dec/exr.cc extras/enc/exr.cc PROPERTIES COMPILE_FLAGS -fexceptions)
-    if (${CMAKE_CXX_COMPILER_ID} MATCHES "Clang")
+    if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
       set_source_files_properties(extras/dec/exr.cc extras/enc/exr.cc PROPERTIES COMPILE_FLAGS -fcxx-exceptions)
     endif()
   endif()
@@ -183,12 +183,10 @@ target_compile_definitions(jxl_extras_dec-static PUBLIC ${JXL_EXTRAS_DEC_PUBLIC_
 target_link_libraries(jxl_extras_dec-static PRIVATE ${JXL_EXTRAS_DEC_INTERNAL_LIBRARIES})
 
 ### Shared library.
-if (((NOT DEFINED "${TARGET_SUPPORTS_SHARED_LIBS}") OR
-     TARGET_SUPPORTS_SHARED_LIBS) AND NOT JPEGXL_STATIC AND BUILD_SHARED_LIBS)
+if (BUILD_SHARED_LIBS)
 add_library(jxl_extras_dec SHARED $<TARGET_OBJECTS:jxl_extras_dec-obj>)
 target_compile_definitions(jxl_extras_dec PUBLIC ${JXL_EXTRAS_DEC_PUBLIC_DEFINITIONS})
 target_link_libraries(jxl_extras_dec PRIVATE ${JXL_EXTRAS_DEC_INTERNAL_LIBRARIES} jxl)
 else()
 add_library(jxl_extras_dec ALIAS jxl_extras_dec-static)
-endif()  # TARGET_SUPPORTS_SHARED_LIBS AND NOT JPEGXL_STATIC AND
-         # BUILD_SHARED_LIBS
+endif()  # BUILD_SHARED_LIBS

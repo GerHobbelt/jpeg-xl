@@ -40,7 +40,7 @@ if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/googletest/CMakeLists.txt" AND
   set_target_properties(gmock_main PROPERTIES POSITION_INDEPENDENT_CODE TRUE)
 
   # googletest doesn't compile clean with clang-cl (-Wundef)
-  if (WIN32 AND ${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang")
+  if (WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     set_target_properties(gtest PROPERTIES COMPILE_FLAGS "-Wno-error")
     set_target_properties(gmock PROPERTIES COMPILE_FLAGS "-Wno-error")
     set_target_properties(gtest_main PROPERTIES COMPILE_FLAGS "-Wno-error")
@@ -68,7 +68,7 @@ if (NOT DEFINED GMOCK_INCLUDE_DIR)
   find_path(
       GMOCK_INCLUDE_DIR "gmock/gmock.h"
       HINTS ${GTEST_INCLUDE_DIRS})
-  if ("${GMOCK_INCLUDE_DIR}" STREQUAL "GMOCK_INCLUDE_DIR-NOTFOUND")
+  if (NOT GMOCK_INCLUDE_DIR)
     set(BUILD_TESTING OFF CACHE BOOL "Build tests" FORCE)
     message(SEND_ERROR "GMock not found. Install googletest package "
             "(libgmock-dev) in the system or download googletest to "
@@ -76,7 +76,7 @@ if (NOT DEFINED GMOCK_INCLUDE_DIR)
             "To disable tests instead re-run cmake with -DBUILD_TESTING=OFF.")
   else()
     message(STATUS "Found GMock: ${GMOCK_INCLUDE_DIR}")
-  endif()  # GMOCK_INCLUDE_DIR-NOTFOUND
+  endif()  # NOT GMOCK_INCLUDE_DIR
 endif()  # NOT DEFINED GMOCK_INCLUDE_DIR
 endif()  # BUILD_TESTING
 
