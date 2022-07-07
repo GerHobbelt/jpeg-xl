@@ -62,10 +62,11 @@ set(TOOL_BINARIES)
 add_library(jxl_tool STATIC EXCLUDE_FROM_ALL
   cmdline.cc
   codec_config.cc
+  speed_stats.cc
   tool_version.cc
 )
 target_compile_options(jxl_tool PUBLIC "${JPEGXL_INTERNAL_FLAGS}")
-target_link_libraries(jxl_tool jxl-static)
+target_link_libraries(jxl_tool hwy)
 
 target_include_directories(jxl_tool
   PUBLIC "${PROJECT_SOURCE_DIR}")
@@ -122,7 +123,6 @@ if(JPEGXL_ENABLE_TOOLS)
   list(APPEND TOOL_BINARIES
     cjxl
     cjxl_ng
-    djxl
     cjpeg_hdr
     jxlinfo
   )
@@ -130,7 +130,6 @@ if(JPEGXL_ENABLE_TOOLS)
   # Main compressor.
   add_executable(cjxl
     cjxl.cc
-    speed_stats.cc
     cjxl_main.cc
   )
   target_link_libraries(cjxl
@@ -139,7 +138,6 @@ if(JPEGXL_ENABLE_TOOLS)
     jxl_extras-static
     jxl_threads-static
   )
-
 
   add_executable(cjxl_ng
     cjxl_ng_main.cc
@@ -156,14 +154,14 @@ if(JPEGXL_ENABLE_TOOLS)
     set_target_properties(cjxl_ng PROPERTIES LINK_FLAGS "-s USE_LIBPNG=1")
   endif()
 
-  add_executable(djxl_ng
-    djxl_ng_main.cc
+  add_executable(djxl
+    djxl_main.cc
   )
-  target_link_libraries(djxl_ng
+  target_link_libraries(djxl
     jxl_dec
-    jxl_gflags
-    jxl_threads
     jxl_extras-static
+    jxl_threads
+    jxl_tool
   )
 
   add_executable(cjpeg_hdr
@@ -174,23 +172,6 @@ if(JPEGXL_ENABLE_TOOLS)
     jxl_extras-static
     jxl_threads-static
   )
-
-  # Main decompressor.
-  add_library(djxltool STATIC
-    djxl.cc
-    speed_stats.cc
-  )
-  target_link_libraries(djxltool
-    box
-    jxl-static
-    jxl_extras-static
-    jxl_threads-static
-  )
-
-  add_executable(djxl
-    djxl_main.cc
-  )
-  target_link_libraries(djxl djxltool)
 
   add_executable(jxlinfo
     jxlinfo.c
@@ -256,8 +237,6 @@ if(${JPEGXL_ENABLE_BENCHMARK} AND JPEGXL_ENABLE_TOOLS)
     benchmark/benchmark_codec_custom.h
     benchmark/benchmark_codec_jxl.cc
     benchmark/benchmark_codec_jxl.h
-    speed_stats.cc
-    speed_stats.h
     ../third_party/dirent.cc
   )
   target_link_libraries(benchmark_xl Threads::Threads)
@@ -328,9 +307,9 @@ foreach(BINARY IN LISTS TOOL_BINARIES)
 endforeach()
 
 if(JPEGXL_ENABLE_TOOLS)
-  list(APPEND TOOL_BINARIES djxl_ng)
+  list(APPEND TOOL_BINARIES djxl)
   if(JPEGXL_EMSCRIPTEN)
-    set_target_properties(djxl_ng PROPERTIES LINK_FLAGS "-s USE_LIBPNG=1")
+    set_target_properties(djxl PROPERTIES LINK_FLAGS "-s USE_LIBPNG=1")
   endif()
 endif()
 
