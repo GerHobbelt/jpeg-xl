@@ -292,8 +292,8 @@ void ModularFrameDecoder::MaybeDropFullImage() {
 Status ModularFrameDecoder::DecodeGroup(
     const Rect& rect, BitReader* reader, int minShift, int maxShift,
     const ModularStreamId& stream, bool zerofill, PassesDecoderState* dec_state,
-    RenderPipelineInput* render_pipeline_input, ImageBundle* output,
-    bool allow_truncated, bool* should_run_pipeline) {
+    RenderPipelineInput* render_pipeline_input, bool allow_truncated,
+    bool* should_run_pipeline) {
   JXL_DEBUG_V(6, "Decoding %s with rect %s and shift bracket %d..%d %s",
               stream.DebugString().c_str(), Description(rect).c_str(), minShift,
               maxShift, zerofill ? "using zerofill" : "");
@@ -676,7 +676,6 @@ Status ModularFrameDecoder::ModularImageToDecodedRect(
 
 Status ModularFrameDecoder::FinalizeDecoding(PassesDecoderState* dec_state,
                                              jxl::ThreadPool* pool,
-                                             ImageBundle* output,
                                              bool inplace) {
   if (!use_full_image) return true;
   Image gi = (inplace ? std::move(full_image) : full_image.clone());
@@ -691,9 +690,7 @@ Status ModularFrameDecoder::FinalizeDecoding(PassesDecoderState* dec_state,
 
   // Undo the global transforms
   gi.undo_transforms(global_header.wp_header, pool);
-  for (auto t : global_transform) {
-    JXL_RETURN_IF_ERROR(t.Inverse(gi, global_header.wp_header));
-  }
+  JXL_DASSERT(global_transform.empty());
   if (gi.error) return JXL_FAILURE("Undoing transforms failed");
 
   for (size_t i = 0; i < dec_state->shared->frame_dim.num_groups; i++) {

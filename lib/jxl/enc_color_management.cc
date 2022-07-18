@@ -647,8 +647,15 @@ Status ProfileEquivalentToICC(const cmsContext context, const Profile& profile1,
 JXL_MUST_USE_RESULT cmsCIEXYZ UnadaptedWhitePoint(const cmsContext context,
                                                   const Profile& profile,
                                                   const ColorEncoding& c) {
-  cmsCIEXYZ XYZ = {1.0, 1.0, 1.0};
+  const cmsCIEXYZ* white_point = static_cast<const cmsCIEXYZ*>(
+      cmsReadTag(profile.get(), cmsSigMediaWhitePointTag));
+  if (white_point != nullptr &&
+      cmsReadTag(profile.get(), cmsSigChromaticAdaptationTag) == nullptr) {
+    // No chromatic adaptation matrix: the white point is already unadapted.
+    return *white_point;
+  }
 
+  cmsCIEXYZ XYZ = {1.0, 1.0, 1.0};
   Profile profile_xyz;
   if (!CreateProfileXYZ(context, &profile_xyz)) return XYZ;
   // Array arguments are one per profile.
@@ -671,8 +678,8 @@ JXL_MUST_USE_RESULT cmsCIEXYZ UnadaptedWhitePoint(const cmsContext context,
   return XYZ;
 }
 
-Status IdentifyPrimaries(const cmsContext context, const Profile& profile, const cmsCIEXYZ& wp_unadapted,
-                         ColorEncoding* c) {
+Status IdentifyPrimaries(const cmsContext context, const Profile& profile,
+                         const cmsCIEXYZ& wp_unadapted, ColorEncoding* c) {
   if (!c->HasPrimaries()) return true;
   if (ColorSpaceFromProfile(profile) == ColorSpace::kUnknown) return true;
 
@@ -683,8 +690,34 @@ Status IdentifyPrimaries(const cmsContext context, const Profile& profile, const
       cmsReadTag(context, profile.get(), cmsSigGreenColorantTag));
   const cmsCIEXYZ* adapted_b = static_cast<const cmsCIEXYZ*>(
       cmsReadTag(context, profile.get(), cmsSigBlueColorantTag));
+
+  cmsCIEXYZ converted_rgb[3];
   if (adapted_r == nullptr || adapted_g == nullptr || adapted_b == nullptr) {
-    return JXL_FAILURE("Failed to retrieve colorants");
+    // No colorant tag, determine the XYZ coordinates of the primaries by
+    // converting from the colorspace.
+    Profile profile_xyz;
+    if (!CreateProfileXYZ(context, &profile_xyz)) {
+      return JXL_FAILURE("Failed to retrieve colorants");
+    }
+    // Array arguments are one per profile.
+    cmsHPROFILE profiles[2] = {profile.get(), profile_xyz.get()};
+    cmsUInt32Number intents[2] = {INTENT_RELATIVE_COLORIMETRIC,
+                                  INTENT_RELATIVE_COLORIMETRIC};
+    cmsBool black_compensation[2] = {0, 0};
+    cmsFloat64Number adaption[2] = {0.0, 0.0};
+    // Only transforming three pixels, so skip expensive optimizations.
+    cmsUInt32Number flags = cmsFLAGS_NOOPTIMIZE | cmsFLAGS_HIGHRESPRECALC;
+    Transform xform(cmsCreateExtendedTransform(
+        context, 2, profiles, black_compensation, intents, adaption, nullptr, 0,
+        Type64(*c), TYPE_XYZ_DBL, flags));
+    if (!xform) return JXL_FAILURE("Failed to retrieve colorants");
+
+    const cmsFloat64Number in[9] = {1.0, 0.0, 0.0, 0.0, 1.0,
+                                    0.0, 0.0, 0.0, 1.0};
+    cmsDoTransform(context, xform.get(), in, &converted_rgb->X, 3);
+    adapted_r = &converted_rgb[0];
+    adapted_g = &converted_rgb[1];
+    adapted_b = &converted_rgb[2];
   }
 
   // TODO(janwas): no longer assume Bradford and D50.
