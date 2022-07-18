@@ -648,9 +648,9 @@ JXL_MUST_USE_RESULT cmsCIEXYZ UnadaptedWhitePoint(const cmsContext context,
                                                   const Profile& profile,
                                                   const ColorEncoding& c) {
   const cmsCIEXYZ* white_point = static_cast<const cmsCIEXYZ*>(
-      cmsReadTag(profile.get(), cmsSigMediaWhitePointTag));
+      cmsReadTag(context, profile.get(), cmsSigMediaWhitePointTag));
   if (white_point != nullptr &&
-      cmsReadTag(profile.get(), cmsSigChromaticAdaptationTag) == nullptr) {
+      cmsReadTag(context, profile.get(), cmsSigChromaticAdaptationTag) == nullptr) {
     // No chromatic adaptation matrix: the white point is already unadapted.
     return *white_point;
   }

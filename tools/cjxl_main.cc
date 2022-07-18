@@ -684,7 +684,7 @@ jxl::Status GetPixeldata(const jxl::PaddedBytes& image_data,
 #define main(cnt, arr) jpegXL_compress_main(cnt, arr)
 #endif
 
-int main(int argc, char** argv) {
+int main(int argc, const char** argv) {
   std::string version = jpegxl::tools::CodecConfigString(JxlEncoderVersion());
   jpegxl::tools::CompressArgs args;
   jpegxl::tools::CommandLineParser cmdline;
