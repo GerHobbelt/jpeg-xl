@@ -267,9 +267,6 @@
     <ClInclude Include="..\lib\jxl\dec_external_image.h">
       <Filter>Source Files\lib\jxl</Filter>
     </ClInclude>
-    <ClInclude Include="..\lib\jxl\dec_file.h">
-      <Filter>Source Files\lib\jxl</Filter>
-    </ClInclude>
     <ClInclude Include="..\lib\jxl\dec_frame.h">
       <Filter>Source Files\lib\jxl</Filter>
     </ClInclude>
@@ -986,9 +983,6 @@
     <ClCompile Include="..\lib\jxl\dec_external_image.cc">
       <Filter>Source Files\lib\jxl</Filter>
     </ClCompile>
-    <ClCompile Include="..\lib\jxl\dec_file.cc">
-      <Filter>Source Files\lib\jxl</Filter>
-    </ClCompile>
     <ClCompile Include="..\lib\jxl\dec_frame.cc">
       <Filter>Source Files\lib\jxl</Filter>
     </ClCompile>
@@ -1071,9 +1065,6 @@
       <Filter>Source Files\lib\jxl</Filter>
     </ClCompile>
     <ClCompile Include="..\lib\jxl\enc_external_image.cc">
-      <Filter>Source Files\lib\jxl</Filter>
-    </ClCompile>
-    <ClCompile Include="..\lib\jxl\enc_fast_heuristics.cc">
       <Filter>Source Files\lib\jxl</Filter>
     </ClCompile>
     <ClCompile Include="..\lib\jxl\enc_file.cc">
@@ -1444,6 +1435,9 @@
     </ClCompile>
     <ClCompile Include="..\lib\jxl\modular\encoding\enc_debug_tree.cc">
       <Filter>Source Files\lib\jxl\modular\encoding</Filter>
+    </ClCompile>
+    <ClCompile Include="..\third_party\highway\hwy\per_target.cc">
+      <Filter>Source Files\third_party\highway</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

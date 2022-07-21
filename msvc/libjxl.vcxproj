@@ -214,7 +214,6 @@
     <ClInclude Include="..\lib\jxl\dec_cache.h" />
     <ClInclude Include="..\lib\jxl\dec_context_map.h" />
     <ClInclude Include="..\lib\jxl\dec_external_image.h" />
-    <ClInclude Include="..\lib\jxl\dec_file.h" />
     <ClInclude Include="..\lib\jxl\dec_frame.h" />
     <ClInclude Include="..\lib\jxl\dec_group.h" />
     <ClInclude Include="..\lib\jxl\dec_group_border.h" />
@@ -460,7 +459,6 @@
     <ClCompile Include="..\lib\jxl\dec_cache.cc" />
     <ClCompile Include="..\lib\jxl\dec_context_map.cc" />
     <ClCompile Include="..\lib\jxl\dec_external_image.cc" />
-    <ClCompile Include="..\lib\jxl\dec_file.cc" />
     <ClCompile Include="..\lib\jxl\dec_frame.cc" />
     <ClCompile Include="..\lib\jxl\dec_group.cc" />
     <ClCompile Include="..\lib\jxl\dec_group_border.cc" />
@@ -488,7 +486,6 @@
     <ClCompile Include="..\lib\jxl\enc_dot_dictionary.cc" />
     <ClCompile Include="..\lib\jxl\enc_entropy_coder.cc" />
     <ClCompile Include="..\lib\jxl\enc_external_image.cc" />
-    <ClCompile Include="..\lib\jxl\enc_fast_heuristics.cc" />
     <ClCompile Include="..\lib\jxl\enc_file.cc" />
     <ClCompile Include="..\lib\jxl\enc_frame.cc" />
     <ClCompile Include="..\lib\jxl\enc_group.cc" />
@@ -598,6 +595,7 @@
     <ClCompile Include="..\third_party\brotli\c\enc\static_dict.c" />
     <ClCompile Include="..\third_party\brotli\c\enc\utf8_util.c" />
     <ClCompile Include="..\third_party\highway\hwy\aligned_allocator.cc" />
+    <ClCompile Include="..\third_party\highway\hwy\per_target.cc" />
     <ClCompile Include="..\third_party\highway\hwy\targets.cc" />
     <ClCompile Include="..\third_party\lcms\src\cmsalpha.c" />
     <ClCompile Include="..\third_party\lcms\src\cmscam02.c" />
