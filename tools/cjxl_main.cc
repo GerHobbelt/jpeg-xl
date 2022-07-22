@@ -489,7 +489,9 @@ struct CompressArgs {
 
 const char* ModeFromArgs(const CompressArgs& args) {
   if (args.lossless_jpeg) return "JPEG";
-  if (args.modular == jxl::Override::kOn) return "Modular";
+  if (args.modular == jxl::Override::kOn || args.distance == 0 ||
+      args.quality == 100)
+    return "Modular";
   return "VarDCT";
 }
 
