@@ -219,7 +219,7 @@ void VerifyFrameEncoding(size_t xsize, size_t ysize, JxlEncoder* enc,
 #if JXL_HIGH_PRECISION
 	  1.8
 #else
-	  4.8
+      8.0);
 #endif
 	  ;
   EXPECT_LE(
