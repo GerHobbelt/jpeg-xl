@@ -98,6 +98,9 @@ static HWY_INLINE HWY_MAYBE_UNUSED Ticks TicksBefore() {
   Ticks t;
 #if HWY_ARCH_PPC && defined(__GLIBC__)
   asm volatile("mfspr %0, %1" : "=r"(t) : "i"(268));
+#elif HWY_ARCH_ARM_A64 && !HWY_COMPILER_MSVC
+  // pmccntr_el0 is privileged but cntvct_el0 is accessible in Linux and QEMU.
+  asm volatile("mrs %0, cntvct_el0" : "=r"(t));
 #elif HWY_ARCH_X86 && HWY_COMPILER_MSVC
   hwy::LoadFence();
   HWY_FENCE;
@@ -138,6 +141,9 @@ static HWY_INLINE HWY_MAYBE_UNUSED Ticks TicksAfter() {
   Ticks t;
 #if HWY_ARCH_PPC && defined(__GLIBC__)
   asm volatile("mfspr %0, %1" : "=r"(t) : "i"(268));
+#elif HWY_ARCH_ARM_A64 && !HWY_COMPILER_MSVC
+  // pmccntr_el0 is privileged but cntvct_el0 is accessible in Linux and QEMU.
+  asm volatile("mrs %0, cntvct_el0" : "=r"(t));
 #elif HWY_ARCH_X86 && HWY_COMPILER_MSVC
   HWY_FENCE;
   unsigned aux;
