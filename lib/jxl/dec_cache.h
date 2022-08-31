@@ -84,6 +84,8 @@ struct PassesDecoderState {
   uint8_t* rgb_output;
   size_t rgb_stride = 0;
 
+  size_t output_channels;
+
   // Whether to use int16 float-XYB-to-uint8-srgb conversion.
   bool fast_xyb_srgb8_conversion;
 
@@ -93,6 +95,8 @@ struct PassesDecoderState {
   // If true, the RGBA output will be unpremultiplied before writing to the
   // output callback (the output buffer case is handled in ConvertToExternal).
   bool unpremul_alpha;
+
+  bool swap_endianness;
 
   // Callback for line-by-line output.
   PixelCallback pixel_callback;
@@ -138,7 +142,9 @@ struct PassesDecoderState {
 
     rgb_output = nullptr;
     rgb_output_is_rgba = false;
+    output_channels = 3;
     unpremul_alpha = false;
+    swap_endianness = false;
     fast_xyb_srgb8_conversion = false;
     pixel_callback = PixelCallback();
     used_acs = 0;
