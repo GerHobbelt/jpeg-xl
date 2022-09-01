@@ -111,15 +111,15 @@ class UpsamplingStage : public RenderPipelineStage {
     V ups0, ups1, ups2, ups3, ups4, ups5, ups6, ups7;
     (void)ups2, (void)ups3, (void)ups4, (void)ups5, (void)ups6, (void)ups7;
     V* ups[N];
-    if (N >= 2) {
+    if constexpr(N >= 2) {
       ups[0] = &ups0;
       ups[1] = &ups1;
     }
-    if (N >= 4) {
+    if constexpr(N >= 4) {
       ups[2] = &ups2;
       ups[3] = &ups3;
     }
-    if (N == 8) {
+    if constexpr(N == 8) {
       ups[4] = &ups4;
       ups[5] = &ups5;
       ups[6] = &ups6;
