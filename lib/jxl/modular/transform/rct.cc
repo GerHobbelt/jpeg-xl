@@ -116,7 +116,7 @@ Status InvRCT(Image& input, size_t begin_c, size_t rct_type, ThreadPool* pool) {
         std::move(ch2);
     return true;
   }
-  constexpr decltype(&InvRCTRow<0>) inv_rct_row[] = {
+  const decltype(&InvRCTRow<0>) inv_rct_row[] = {
       InvRCTRow<0>, InvRCTRow<1>, InvRCTRow<2>, InvRCTRow<3>,
       InvRCTRow<4>, InvRCTRow<5>, InvRCTRow<6>};
   JXL_RETURN_IF_ERROR(RunOnPool(
