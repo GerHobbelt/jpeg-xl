@@ -838,14 +838,14 @@ int main(int argc, const char** argv) {
       process_flag("resampling", args.resampling,
                    JXL_ENC_FRAME_SETTING_RESAMPLING,
                    [](int64_t x) -> std::string {
-                     return (x == -1 || x == 1 || x == 4 || x == 8)
+                     return (x == -1 || x == 1 || x == 2 || x == 4 || x == 8)
                                 ? ""
                                 : "Valid values are {-1, 1, 2, 4, 8}.\n";
                    });
       process_flag("ec_resampling", args.ec_resampling,
                    JXL_ENC_FRAME_SETTING_EXTRA_CHANNEL_RESAMPLING,
                    [](int64_t x) -> std::string {
-                     return (x == -1 || x == 1 || x == 4 || x == 8)
+                     return (x == -1 || x == 1 || x == 2 || x == 4 || x == 8)
                                 ? ""
                                 : "Valid values are {-1, 1, 2, 4, 8}.\n";
                    });
