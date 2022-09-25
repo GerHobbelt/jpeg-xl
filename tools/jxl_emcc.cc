@@ -15,6 +15,8 @@
 #include "lib/jxl/base/file_io.h"
 #endif
 
+#include "monolithic_examples.h"
+
 namespace {
 
 struct DecoderInstance {
@@ -225,7 +227,13 @@ uint32_t jxlFlush(void* opaque_instance) {
 }
 
 #if !defined(__wasm__)
-int main(int argc, char* argv[]) {
+
+
+#if defined(BUILD_MONOLITHIC)
+#define main(cnt, arr) jpegXL_emcc_main(cnt, arr)
+#endif
+
+int main(int argc, const char** argv) {
   std::vector<uint8_t> data;
   JXL_RETURN_IF_ERROR(jxl::ReadFile(argv[1], &data));
   fprintf(stderr, "File size: %d\n", (int)data.size());
@@ -237,7 +245,9 @@ int main(int argc, char* argv[]) {
   status = jxlProcessInput(instance, nullptr, 0);
   fprintf(stderr, "Process result: %d\n", status);
   jxlDestroyInstance(instance);
+  return 0;
 }
+
 #endif
 
 }  // extern "C"

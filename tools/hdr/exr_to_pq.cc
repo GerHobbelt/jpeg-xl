@@ -14,6 +14,8 @@
 #include "lib/jxl/enc_color_management.h"
 #include "tools/cmdline.h"
 
+#include "monolithic_examples.h"
+
 namespace {
 
 struct LuminanceInfo {
@@ -38,6 +40,11 @@ bool ParseLuminanceInfo(const char* argument, LuminanceInfo* luminance_info) {
 }
 
 }  // namespace
+
+
+#if defined(BUILD_MONOLITHIC)
+#define main(cnt, arr) jpegXL_exr_to_pq_main(cnt, arr)
+#endif
 
 int main(int argc, const char** argv) {
   jxl::ThreadPoolInternal pool;
@@ -152,4 +159,5 @@ int main(int argc, const char** argv) {
   JXL_CHECK(image.TransformTo(pq, jxl::GetJxlCms(), &pool));
   image.metadata.m.color_encoding = pq;
   JXL_CHECK(jxl::EncodeToFile(image, output_filename, &pool));
+  return EXIT_SUCCESS;
 }

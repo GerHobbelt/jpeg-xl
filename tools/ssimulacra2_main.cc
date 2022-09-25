@@ -10,7 +10,9 @@
 #include "lib/jxl/enc_color_management.h"
 #include "tools/ssimulacra2.h"
 
-int PrintUsage(char** argv) {
+#include "monolithic_examples.h"
+
+static int PrintUsage(const char** argv) {
   fprintf(stderr, "Usage: %s orig.png distorted.png\n", argv[0]);
   fprintf(stderr,
           "Returns a score in range -inf..100, which correlates to subjective "
@@ -38,7 +40,13 @@ int PrintUsage(char** argv) {
   return 1;
 }
 
-int main(int argc, char** argv) {
+
+
+#if defined(BUILD_MONOLITHIC)
+#define main(cnt, arr) jpegXL_ssimulacra2_main(cnt, arr)
+#endif
+
+int main(int argc, const char** argv) {
   if (argc != 3) return PrintUsage(argv);
 
   jxl::CodecInOut io1;
