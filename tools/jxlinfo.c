@@ -314,11 +314,11 @@ static int PrintBasicInfo(FILE* file, int verbose) {
       } else {
         printf("full image size");
       }
-
-      float ms = frame_header.duration * 1000.f *
-                 info.animation.tps_denominator / info.animation.tps_numerator;
-      total_duration += ms;
       if (info.have_animation) {
+        float ms = frame_header.duration * 1000.f *
+                   info.animation.tps_denominator /
+                   info.animation.tps_numerator;
+        total_duration += ms;
         printf(", duration: %.1f ms", ms);
         if (info.animation.have_timecodes) {
           printf(", time code: %X", frame_header.timecode);
