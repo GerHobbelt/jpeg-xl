@@ -889,9 +889,14 @@ Status ColorEncoding::SetFieldsFromICC() {
   // skcms does not return the rendering intent, so get it from the file. It
   // is encoded as big-endian 32-bit integer in bytes 60..63.
   uint32_t rendering_intent32 = icc_[67];
-  if (rendering_intent32 > 3 || icc_[64] != 0 || icc_[65] != 0 ||
-      icc_[66] != 0) {
+  if (rendering_intent32 > 3) {
     return JXL_FAILURE("Invalid rendering intent %u\n", rendering_intent32);
+  }
+  uint32_t combined_rending_intent = rendering_intent32 + (icc_[66] << 8) +
+                                     (icc_[65] << 16) + (icc_[64] << 24);
+  if (combined_rending_intent > 3) {
+    JXL_WARNING("Invalid rendering intent: %u, assuming %u was meant",
+                combined_rending_intent, rendering_intent32);
   }
   // ICC and RenderingIntent have the same values (0..3).
   rendering_intent = static_cast<RenderingIntent>(rendering_intent32);
