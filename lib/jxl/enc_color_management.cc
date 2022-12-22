@@ -887,16 +887,31 @@ Status ColorEncoding::SetFieldsFromICC() {
   JXL_RETURN_IF_ERROR(skcms_Parse(icc_.data(), icc_.size(), &profile));
 
   // skcms does not return the rendering intent, so get it from the file. It
-  // is encoded as big-endian 32-bit integer in bytes 60..63.
+  // should be encoded as big-endian 32-bit integer in bytes 60..63.
   uint32_t rendering_intent32 = icc_[67];
-  if (rendering_intent32 > 3) {
-    return JXL_FAILURE("Invalid rendering intent %u\n", rendering_intent32);
+  if (icc_[64] == 0 && icc_[65] == 0 && icc_[66] == 0) {
+    // This is the big-endian as the ICC spec requires it case.
+    if (rendering_intent32 > 3) {
+      return JXL_FAILURE("Invalid rendering intent %u\n", rendering_intent32);
+    }
+  } else {
+    // This case has two subcases: the rendering intent
+    // - is completely invalid -> we fail or
+    // - is invalid because is it provided as little-endian ->  we warn.
+    if ((icc_[67] != 0) || icc_[65] != 0 || icc_[66] != 0 || icc_[64] > 3) {
+      return JXL_FAILURE(
+          "Invalid rendering intent bytes: [0x%02X 0x%02X 0x%02X 0x%02X]\n",
+          icc_[64], icc_[65], icc_[66], icc_[67]);
+    }
+    rendering_intent32 = icc_[64];
+    JXL_WARNING(
+        "Invalid rendering intent bytes: [0x%02X 0x%02X 0x%02X 0x%02X], "
+        "assuming %u was meant",
+        icc_[64], icc_[65], icc_[66], icc_[67], rendering_intent32);
   }
   uint32_t combined_rending_intent = rendering_intent32 + (icc_[66] << 8) +
                                      (icc_[65] << 16) + (icc_[64] << 24);
   if (combined_rending_intent > 3) {
-    JXL_WARNING("Invalid rendering intent: %u, assuming %u was meant",
-                combined_rending_intent, rendering_intent32);
   }
   // ICC and RenderingIntent have the same values (0..3).
   rendering_intent = static_cast<RenderingIntent>(rendering_intent32);
