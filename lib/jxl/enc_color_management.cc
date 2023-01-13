@@ -894,19 +894,20 @@ Status ColorEncoding::SetFieldsFromICC() {
   // compliant. However we accept those with a warning.
   uint32_t litte_endian_rendering_intent =
       (icc_[67] << 24) + (icc_[66] << 16) + (icc_[65] << 8) + icc_[64];
-  uint32_t cand_rendering_intent =
+  uint32_t candidate_rendering_intent =
       std::min(big_endian_rendering_intent, litte_endian_rendering_intent);
-  if (cand_rendering_intent == litte_endian_rendering_intent) {
+  if (candidate_rendering_intent == litte_endian_rendering_intent) {
     JXL_WARNING(
         "Invalid rendering intent bytes: [0x%02X 0x%02X 0x%02X 0x%02X], "
         "assuming %u was meant",
-        icc_[64], icc_[65], icc_[66], icc_[67], cand_rendering_intent);
+        icc_[64], icc_[65], icc_[66], icc_[67], candidate_rendering_intent);
   }
-  if (cand_rendering_intent > 3) {
-    return JXL_FAILURE("Invalid rendering intent %u\n", cand_rendering_intent);
+  if (candidate_rendering_intent > 3) {
+    return JXL_FAILURE("Invalid rendering intent %u\n",
+                       candidate_rendering_intent);
   }
   // ICC and RenderingIntent have the same values (0..3).
-  rendering_intent = static_cast<RenderingIntent>(cand_rendering_intent);
+  rendering_intent = static_cast<RenderingIntent>(candidate_rendering_intent);
 
   if (profile.has_CICP && ApplyCICP(profile.CICP.color_primaries,
                                     profile.CICP.transfer_characteristics,
