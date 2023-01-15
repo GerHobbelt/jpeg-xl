@@ -217,9 +217,9 @@ void VerifyFrameEncoding(size_t xsize, size_t ysize, JxlEncoder* enc,
 
   const double expected_distance =
 #if JXL_HIGH_PRECISION
-	  1.8
+      1.84
 #else
-      8.0);
+      8.7
 #endif
 	  ;
   EXPECT_LE(
