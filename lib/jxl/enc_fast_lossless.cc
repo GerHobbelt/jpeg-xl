@@ -3,6 +3,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+#ifndef FJXL_SELF_INCLUDE
+
 #include "lib/jxl/enc_fast_lossless.h"
 #include "lib/jxl/base/byte_order.h"
 
@@ -16,15 +18,15 @@
 #include <memory>
 #include <vector>
 
-#if (!defined(__BYTE_ORDER__) || (__BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__))
-#error "system not known to be little endian"
-#endif
-
-#ifdef _MSC_VER
+#if defined(_MSC_VER) && !defined(__clang__)
 #define FJXL_INLINE __forceinline
 #else
 #define FJXL_INLINE inline __attribute__((always_inline))
 #endif
+
+#endif  // FJXL_SELF_INCLUDE
+
+#ifdef FJXL_SELF_INCLUDE
 
 namespace {
 
@@ -55,6 +57,17 @@ inline uint32_t Log2(uint32_t value)
 
 #endif  // _MSC_VER
 
+// Compiles to a memcpy on little-endian systems.
+FJXL_INLINE void StoreLE64(uint8_t* tgt, uint64_t data) {
+#if (!defined(__BYTE_ORDER__) || (__BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__))
+  for (int i = 0; i < 8; i++) {
+    tgt[i] = (data >> (i * 8)) & 0xFF;
+  }
+#else
+  memcpy(tgt, &data, 8);
+#endif
+}
+
 constexpr size_t kNumRawSymbols = 19;
 
 struct BitWriter {
@@ -67,7 +80,7 @@ struct BitWriter {
   void Write(uint32_t count, uint64_t bits) {
     buffer |= bits << bits_in_buffer;
     bits_in_buffer += count;
-    memcpy(data.get() + bytes_written, &buffer, 8);
+    StoreLE64(data.get() + bytes_written, buffer);
     size_t bytes_in_buffer = bits_in_buffer / 8;
     bits_in_buffer -= bytes_in_buffer * 8;
     buffer >>= bytes_in_buffer * 8;
@@ -343,7 +356,7 @@ struct PrefixCode {
   }
 };
 
-#ifdef FASTLL_ENABLE_AVX2_INTRINSICS
+#ifdef FJXL_AVX2
 #include <immintrin.h>
 void EncodeChunkAVX2(const uint16_t* residuals, const PrefixCode& code,
                      BitWriter& output) {
@@ -465,7 +478,7 @@ void EncodeChunkAVX2(const uint16_t* residuals, const PrefixCode& code,
 }
 #endif
 
-#ifdef FASTLL_ENABLE_NEON_INTRINSICS
+#ifdef FJXL_NEON
 #include <arm_neon.h>
 
 FJXL_INLINE void TokenizeNeon(const uint16_t* residuals, uint16_t* token_out,
@@ -700,10 +713,10 @@ struct UpTo8Bits {
 
   static void EncodeChunk(upixel_t* residuals, const PrefixCode& code,
                           BitWriter& output) {
-#if defined(FASTLL_ENABLE_AVX2_INTRINSICS) && FASTLL_ENABLE_AVX2_INTRINSICS
+#ifdef FJXL_AVX2
     EncodeChunkAVX2(residuals, code, output);
     return;
-#elif defined(FASTLL_ENABLE_NEON_INTRINSICS) && FASTLL_ENABLE_NEON_INTRINSICS
+#elif defined(FJXL_NEON)
     for (int i : {0, 8}) {
       uint16_t bits[8];
       uint16_t nbits[8];
@@ -762,7 +775,7 @@ struct From9To13Bits {
 
   static void EncodeChunk(upixel_t* residuals, const PrefixCode& code,
                           BitWriter& output) {
-#if defined(FASTLL_ENABLE_NEON_INTRINSICS) && FASTLL_ENABLE_NEON_INTRINSICS
+#ifdef FJXL_NEON
     for (int i : {0, 8}) {
       uint16_t bits[8];
       uint16_t nbits[8];
@@ -825,7 +838,7 @@ struct Exactly14Bits {
 
   static void EncodeChunk(upixel_t* residuals, const PrefixCode& code,
                           BitWriter& output) {
-#if defined(FASTLL_ENABLE_NEON_INTRINSICS) && FASTLL_ENABLE_NEON_INTRINSICS
+#ifdef FJXL_NEON
     for (int i : {0, 8}) {
       uint16_t bits[8];
       uint16_t nbits[8];
@@ -886,7 +899,7 @@ struct MoreThan14Bits {
 
   static void EncodeChunk(upixel_t* residuals, const PrefixCode& code,
                           BitWriter& output) {
-#if defined(FASTLL_ENABLE_NEON_INTRINSICS) && FASTLL_ENABLE_NEON_INTRINSICS
+#ifdef FJXL_NEON
     for (int i : {0, 8}) {
       uint32_t bits[8];
       uint32_t nbits[8];
@@ -1246,8 +1259,8 @@ struct ChannelRowProcessor {
   using upixel_t = typename BitDepth::upixel_t;
   using pixel_t = typename BitDepth::pixel_t;
   T* t;
-  inline void ProcessChunk(const pixel_t* row, const pixel_t* row_left,
-                           const pixel_t* row_top, const pixel_t* row_topleft) {
+  void ProcessChunk(const pixel_t* row, const pixel_t* row_left,
+                    const pixel_t* row_top, const pixel_t* row_topleft) {
     bool continue_rle = true;
     alignas(32) upixel_t residuals[kChunkSize] = {};
     for (size_t ix = 0; ix < kChunkSize; ix++) {
@@ -1277,6 +1290,7 @@ struct ChannelRowProcessor {
     }
     last = residuals[kChunkSize - 1];
   }
+
   void ProcessRow(const pixel_t* row, const pixel_t* row_left,
                   const pixel_t* row_top, const pixel_t* row_topleft,
                   size_t xs) {
@@ -1290,7 +1304,8 @@ struct ChannelRowProcessor {
   upixel_t last = std::numeric_limits<upixel_t>::max();  // Can never appear
 };
 
-template <typename Processor, size_t nb_chans, typename BitDepth>
+template <typename Processor, size_t nb_chans, typename BitDepth,
+          bool big_endian>
 void ProcessImageArea(const unsigned char* rgba, size_t x0, size_t y0,
                       size_t oxs, size_t xs, size_t yskip, size_t ys,
                       size_t row_stride, BitDepth bitdepth,
@@ -1309,9 +1324,15 @@ void ProcessImageArea(const unsigned char* rgba, size_t x0, size_t y0,
                      (x0 + x) * nb_chans * BitDepth::kInputBytes +
                      channel * BitDepth::kInputBytes];
     if (BitDepth::kInputBytes == 2) {
-      p <<= 8;
-      p |= rgba[row_stride * (y0 + y) + (x0 + x) * nb_chans * 2 + channel * 2 +
-                1];
+      if (big_endian) {
+        p <<= 8;
+        p |= rgba[row_stride * (y0 + y) + (x0 + x) * nb_chans * 2 +
+                  channel * 2 + 1];
+      } else {
+        p |= rgba[row_stride * (y0 + y) + (x0 + x) * nb_chans * 2 +
+                  channel * 2 + 1]
+             << 8;
+      }
     }
     return p;
   };
@@ -1393,10 +1414,24 @@ void ProcessImageArea(const unsigned char* rgba, size_t x0, size_t y0,
   }
 }
 
+template <typename Processor, size_t nb_chans, typename BitDepth>
+void ProcessImageArea(const unsigned char* rgba, size_t x0, size_t y0,
+                      size_t oxs, size_t xs, size_t yskip, size_t ys,
+                      size_t row_stride, BitDepth bitdepth, bool big_endian,
+                      Processor* processors) {
+  if (big_endian) {
+    ProcessImageArea<Processor, nb_chans, BitDepth, /*big_endian=*/true>(
+        rgba, x0, y0, oxs, xs, yskip, ys, row_stride, bitdepth, processors);
+  } else {
+    ProcessImageArea<Processor, nb_chans, BitDepth, /*big_endian=*/false>(
+        rgba, x0, y0, oxs, xs, yskip, ys, row_stride, bitdepth, processors);
+  }
+}
+
 template <size_t nb_chans, typename BitDepth>
 void WriteACSection(const unsigned char* rgba, size_t x0, size_t y0, size_t oxs,
                     size_t ys, size_t row_stride, bool is_single_group,
-                    BitDepth bitdepth, const PrefixCode& code,
+                    BitDepth bitdepth, bool big_endian, const PrefixCode& code,
                     std::array<BitWriter, 4>& output) {
   size_t xs = (oxs + kChunkSize - 1) / kChunkSize * kChunkSize;
   for (size_t i = 0; i < nb_chans; i++) {
@@ -1421,7 +1456,7 @@ void WriteACSection(const unsigned char* rgba, size_t x0, size_t y0, size_t oxs,
   }
   ProcessImageArea<ChannelRowProcessor<ChunkEncoder<BitDepth>, BitDepth>,
                    nb_chans>(rgba, x0, y0, oxs, xs, 0, ys, row_stride, bitdepth,
-                             row_encoders);
+                             big_endian, row_encoders);
 }
 
 constexpr int kHashExp = 16;
@@ -1508,7 +1543,7 @@ template <size_t nb_chans, typename BitDepth>
 void CollectSamples(const unsigned char* rgba, size_t x0, size_t y0, size_t xs,
                     size_t row_stride, size_t row_count, uint64_t* raw_counts,
                     uint64_t* lz77_counts, bool palette, BitDepth bitdepth,
-                    const int16_t* lookup) {
+                    bool big_endian, const int16_t* lookup) {
   if (palette) {
     ChunkSampleCollector<UpTo8Bits> sample_collectors[nb_chans];
     ChannelRowProcessor<ChunkSampleCollector<UpTo8Bits>, UpTo8Bits>
@@ -1534,7 +1569,7 @@ void CollectSamples(const unsigned char* rgba, size_t x0, size_t y0, size_t xs,
     ProcessImageArea<
         ChannelRowProcessor<ChunkSampleCollector<BitDepth>, BitDepth>,
         nb_chans>(rgba, x0, y0, xs, xs, 1, 1 + row_count, row_stride, bitdepth,
-                  row_sample_collectors);
+                  big_endian, row_sample_collectors);
   }
 }
 
@@ -1601,8 +1636,9 @@ void PrepareDCGlobalPalette(bool is_single_group, size_t width, size_t height,
 
 template <size_t nb_chans, typename BitDepth>
 size_t LLEnc(const unsigned char* rgba, size_t width, size_t stride,
-             size_t height, BitDepth bitdepth, int effort,
-             unsigned char** output) {
+             size_t height, BitDepth bitdepth, bool big_endian, int effort,
+             unsigned char** output, void* runner_opaque,
+             FJxlParallelRunner runner) {
   assert(width != 0);
   assert(height != 0);
   assert(stride >= nb_chans * BitDepth::kInputBytes * width);
@@ -1726,7 +1762,7 @@ size_t LLEnc(const unsigned char* rgba, size_t width, size_t stride,
         std::min<size_t>(width - xg * 256, 256) / kChunkSize * kChunkSize;
     CollectSamples<nb_chans>(rgba, xg * 256, y_begin, x_max, stride, y_count,
                              raw_counts, lz77_counts, !collided, bitdepth,
-                             lookup);
+                             big_endian, lookup);
   }
 
   // TODO(veluca): can probably improve this and make it bitdepth-dependent.
@@ -1779,10 +1815,8 @@ size_t LLEnc(const unsigned char* rgba, size_t width, size_t stride,
     PrepareDCGlobalPalette(onegroup, width, height, hcode, palette, pcolors,
                            &group_data[0][0]);
   }
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
-  for (size_t g = 0; g < num_groups_y * num_groups_x; g++) {
+
+  auto run_one = [&](size_t g) {
     size_t xg = g % num_groups_x;
     size_t yg = g / num_groups_x;
     size_t group_id =
@@ -1794,13 +1828,18 @@ size_t LLEnc(const unsigned char* rgba, size_t width, size_t stride,
     auto& gd = group_data[group_id];
     if (collided) {
       WriteACSection<nb_chans>(rgba, x0, y0, xs, ys, stride, onegroup, bitdepth,
-                               hcode, gd);
+                               big_endian, hcode, gd);
 
     } else {
       WriteACSectionPalette<nb_chans>(rgba, x0, y0, xs, ys, stride, onegroup,
                                       hcode, lookup, gd[0]);
     }
-  }
+  };
+
+  runner(
+      runner_opaque, &run_one,
+      +[](void* r, size_t i) { (*reinterpret_cast<decltype(&run_one)>(r))(i); },
+      num_groups_x * num_groups_y);
 
   AssembleFrame(width, height, nb_chans, bitdepth.bitdepth, kChunkSize,
                 group_data, &writer);
@@ -1811,49 +1850,123 @@ size_t LLEnc(const unsigned char* rgba, size_t width, size_t stride,
 
 template <typename BitDepth>
 size_t LLEnc(const unsigned char* rgba, size_t width, size_t stride,
-             size_t height, size_t nb_chans, BitDepth bitdepth, int effort,
-             unsigned char** output) {
+             size_t height, size_t nb_chans, BitDepth bitdepth, bool big_endian,
+             int effort, unsigned char** output, void* runner_opaque,
+             FJxlParallelRunner runner) {
   assert(nb_chans <= 4);
   assert(nb_chans != 0);
   if (nb_chans == 1) {
-    return LLEnc<1>(rgba, width, stride, height, bitdepth, effort, output);
+    return LLEnc<1>(rgba, width, stride, height, bitdepth, big_endian, effort,
+                    output, runner_opaque, runner);
   }
   if (nb_chans == 2) {
-    return LLEnc<2>(rgba, width, stride, height, bitdepth, effort, output);
+    return LLEnc<2>(rgba, width, stride, height, bitdepth, big_endian, effort,
+                    output, runner_opaque, runner);
   }
   if (nb_chans == 3) {
-    return LLEnc<3>(rgba, width, stride, height, bitdepth, effort, output);
+    return LLEnc<3>(rgba, width, stride, height, bitdepth, big_endian, effort,
+                    output, runner_opaque, runner);
   }
-  return LLEnc<4>(rgba, width, stride, height, bitdepth, effort, output);
+  return LLEnc<4>(rgba, width, stride, height, bitdepth, big_endian, effort,
+                  output, runner_opaque, runner);
+}
+
+size_t JxlFastLosslessEncodeImpl(const unsigned char* rgba, size_t width,
+                                 size_t stride, size_t height, size_t nb_chans,
+                                 size_t bitdepth, bool big_endian, int effort,
+                                 unsigned char** output, void* runner_opaque,
+                                 FJxlParallelRunner runner) {
+  assert(bitdepth > 0);
+  if (bitdepth <= 8) {
+    return LLEnc(rgba, width, stride, height, nb_chans, UpTo8Bits(bitdepth),
+                 big_endian, effort, output, runner_opaque, runner);
+  }
+  if (bitdepth <= 13) {
+    return LLEnc(rgba, width, stride, height, nb_chans, From9To13Bits(bitdepth),
+                 big_endian, effort, output, runner_opaque, runner);
+  }
+  if (bitdepth == 14) {
+    return LLEnc(rgba, width, stride, height, nb_chans, Exactly14Bits(bitdepth),
+                 big_endian, effort, output, runner_opaque, runner);
+  }
+  return LLEnc(rgba, width, stride, height, nb_chans, MoreThan14Bits(bitdepth),
+               big_endian, effort, output, runner_opaque, runner);
 }
 
 }  // namespace
+
+#endif  // FJXL_SELF_INCLUDE
+
+#ifndef FJXL_SELF_INCLUDE
+
+#define FJXL_SELF_INCLUDE
+
+#if defined(__aarch64__) || defined(_M_ARM64)
+
+#define FJXL_NEON
+#include "lib/jxl/enc_fast_lossless.cc"
+
+#elif defined(__x86_64__) || defined(_M_X64)
+
+#include "lib/jxl/enc_fast_lossless.cc"
+
+#ifdef __clang__
+#pragma clang attribute push(__attribute__((target("avx2"))), \
+                             apply_to = function)
+#elif defined(__GNUC__)
+#pragma GCC push_options
+#pragma GCC target "avx2"
+#endif
+
+namespace AVX2 {
+#define FJXL_AVX2
+#include "lib/jxl/enc_fast_lossless.cc"
+}  // namespace AVX2
+
+#ifdef __clang__
+#pragma clang attribute pop
+#elif defined(__GNUC__)
+#pragma GCC pop_options
+#endif
+
+#else
+#include "lib/jxl/enc_fast_lossless.cc"
+#endif
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 size_t JxlFastLosslessEncode(const unsigned char* rgba, size_t width,
-                             size_t stride, size_t height, size_t nb_chans,
-                             size_t bitdepth, int effort,
-                             unsigned char** output) {
-  assert(bitdepth > 0);
-  if (bitdepth <= 8) {
-    return LLEnc(rgba, width, stride, height, nb_chans, UpTo8Bits(bitdepth),
-                 effort, output);
+                             size_t row_stride, size_t height, size_t nb_chans,
+                             size_t bitdepth, bool big_endian, int effort,
+                             unsigned char** output, void* runner_opaque,
+                             FJxlParallelRunner runner) {
+  auto trivial_runner =
+      +[](void*, void* opaque, void fun(void*, size_t), size_t count) {
+        for (size_t i = 0; i < count; i++) {
+          fun(opaque, i);
+        }
+      };
+
+  if (runner == nullptr) {
+    runner = trivial_runner;
   }
-  if (bitdepth <= 13) {
-    return LLEnc(rgba, width, stride, height, nb_chans, From9To13Bits(bitdepth),
-                 effort, output);
+
+  // TODO(veluca): MSVC dynamic dispatch.
+#if (!defined(_MSC_VER) || defined(__clang__)) && defined(__x86_64__)
+  if (__builtin_cpu_supports("avx2")) {
+    return AVX2::JxlFastLosslessEncodeImpl(
+        rgba, width, row_stride, height, nb_chans, bitdepth, big_endian, effort,
+        output, runner_opaque, runner);
   }
-  if (bitdepth == 14) {
-    return LLEnc(rgba, width, stride, height, nb_chans, Exactly14Bits(bitdepth),
-                 effort, output);
-  }
-  return LLEnc(rgba, width, stride, height, nb_chans, MoreThan14Bits(bitdepth),
-               effort, output);
+#endif
+  return JxlFastLosslessEncodeImpl(rgba, width, row_stride, height, nb_chans,
+                                   bitdepth, big_endian, effort, output,
+                                   runner_opaque, runner);
 }
 
 #ifdef __cplusplus
 }  // extern "C"
 #endif
+#endif  // FJXL_SELF_INCLUDE
