@@ -140,6 +140,280 @@ struct BitWriter {
   size_t bits_in_buffer = 0;
   uint64_t buffer = 0;
 };
+
+constexpr size_t kNumRawSymbols = 19;
+static constexpr size_t kNumLZ77 = 17;
+
+constexpr size_t kLZ77Offset = 224;
+
+struct PrefixCode {
+  uint8_t raw_nbits[kNumRawSymbols] = {};
+  uint8_t raw_bits[kNumRawSymbols] = {};
+
+  alignas(64) uint8_t raw_nbits_simd[16] = {};
+  alignas(64) uint8_t raw_bits_simd[16] = {};
+
+  uint8_t lz77_nbits[kNumLZ77] = {};
+  uint16_t lz77_bits[kNumLZ77] = {};
+
+  static uint16_t BitReverse(size_t nbits, uint16_t bits) {
+    constexpr uint16_t kNibbleLookup[16] = {
+        0b0000, 0b1000, 0b0100, 0b1100, 0b0010, 0b1010, 0b0110, 0b1110,
+        0b0001, 0b1001, 0b0101, 0b1101, 0b0011, 0b1011, 0b0111, 0b1111,
+    };
+    uint16_t rev16 = (kNibbleLookup[bits & 0xF] << 12) |
+                     (kNibbleLookup[(bits >> 4) & 0xF] << 8) |
+                     (kNibbleLookup[(bits >> 8) & 0xF] << 4) |
+                     (kNibbleLookup[bits >> 12]);
+    return rev16 >> (16 - nbits);
+  }
+
+  // Create the prefix codes given the code lengths.
+  // Supports the code lengths being split into two halves.
+  static void ComputeCanonicalCode(const uint8_t* first_chunk_nbits,
+                                   uint8_t* first_chunk_bits,
+                                   size_t first_chunk_size,
+                                   const uint8_t* second_chunk_nbits,
+                                   uint16_t* second_chunk_bits,
+                                   size_t second_chunk_size) {
+    constexpr size_t kMaxCodeLength = 15;
+    uint8_t code_length_counts[kMaxCodeLength + 1] = {};
+    for (size_t i = 0; i < first_chunk_size; i++) {
+      code_length_counts[first_chunk_nbits[i]]++;
+      assert(first_chunk_nbits[i] <= kMaxCodeLength);
+      assert(first_chunk_nbits[i] <= 8);
+      assert(first_chunk_nbits[i] > 0);
+    }
+    for (size_t i = 0; i < second_chunk_size; i++) {
+      code_length_counts[second_chunk_nbits[i]]++;
+      assert(second_chunk_nbits[i] <= kMaxCodeLength);
+    }
+
+    uint16_t next_code[kMaxCodeLength + 1] = {};
+
+    uint16_t code = 0;
+    for (size_t i = 1; i < kMaxCodeLength + 1; i++) {
+      code = (code + code_length_counts[i - 1]) << 1;
+      next_code[i] = code;
+    }
+
+    for (size_t i = 0; i < first_chunk_size; i++) {
+      first_chunk_bits[i] =
+          BitReverse(first_chunk_nbits[i], next_code[first_chunk_nbits[i]]++);
+    }
+    for (size_t i = 0; i < second_chunk_size; i++) {
+      second_chunk_bits[i] =
+          BitReverse(second_chunk_nbits[i], next_code[second_chunk_nbits[i]]++);
+    }
+  }
+
+  // Computes nbits[i] for i <= n, subject to min_limit[i] <= nbits[i] <=
+  // max_limit[i], so to minimize sum(nbits[i] * freqs[i]).
+  static void ComputeCodeLengthsNonZero(const uint64_t* freqs, size_t n,
+                                        uint8_t* min_limit, uint8_t* max_limit,
+                                        uint8_t* nbits) {
+    size_t precision = 0;
+    uint64_t freqsum = 0;
+    for (size_t i = 0; i < n; i++) {
+      assert(freqs[i] != 0);
+      freqsum += freqs[i];
+      if (min_limit[i] < 1) min_limit[i] = 1;
+      assert(min_limit[i] <= max_limit[i]);
+      precision = std::max<size_t>(max_limit[i], precision);
+    }
+    uint64_t infty = freqsum * precision;
+    std::vector<uint64_t> dynp(((1U << precision) + 1) * (n + 1), infty);
+    auto d = [&](size_t sym, size_t off) -> uint64_t& {
+      return dynp[sym * ((1 << precision) + 1) + off];
+    };
+    d(0, 0) = 0;
+    for (size_t sym = 0; sym < n; sym++) {
+      for (size_t bits = min_limit[sym]; bits <= max_limit[sym]; bits++) {
+        size_t off_delta = 1U << (precision - bits);
+        for (size_t off = 0; off + off_delta <= (1U << precision); off++) {
+          d(sym + 1, off + off_delta) = std::min(
+              d(sym, off) + freqs[sym] * bits, d(sym + 1, off + off_delta));
+        }
+      }
+    }
+
+    size_t sym = n;
+    size_t off = 1U << precision;
+
+    assert(d(sym, off) != infty);
+
+    while (sym-- > 0) {
+      assert(off > 0);
+      for (size_t bits = min_limit[sym]; bits <= max_limit[sym]; bits++) {
+        size_t off_delta = 1U << (precision - bits);
+        if (off_delta <= off &&
+            d(sym + 1, off) == d(sym, off - off_delta) + freqs[sym] * bits) {
+          off -= off_delta;
+          nbits[sym] = bits;
+          break;
+        }
+      }
+    }
+  }
+  static void ComputeCodeLengths(const uint64_t* freqs, size_t n,
+                                 const uint8_t* min_limit_in,
+                                 const uint8_t* max_limit_in, uint8_t* nbits) {
+    assert(n <= kNumRawSymbols + 1);
+    uint64_t compact_freqs[kNumRawSymbols + 1];
+    uint8_t min_limit[kNumRawSymbols + 1];
+    uint8_t max_limit[kNumRawSymbols + 1];
+    size_t ni = 0;
+    for (size_t i = 0; i < n; i++) {
+      if (freqs[i]) {
+        compact_freqs[ni] = freqs[i];
+        min_limit[ni] = min_limit_in[i];
+        max_limit[ni] = max_limit_in[i];
+        ni++;
+      }
+    }
+    uint8_t num_bits[kNumRawSymbols + 1] = {};
+    ComputeCodeLengthsNonZero(compact_freqs, ni, min_limit, max_limit,
+                              num_bits);
+    ni = 0;
+    for (size_t i = 0; i < n; i++) {
+      nbits[i] = 0;
+      if (freqs[i]) {
+        nbits[i] = num_bits[ni++];
+      }
+    }
+  }
+
+  // Invalid code, used to construct arrays.
+  PrefixCode() {}
+
+  template <typename BitDepth>
+  PrefixCode(BitDepth, uint64_t* raw_counts, uint64_t* lz77_counts) {
+    // "merge" together all the lz77 counts in a single symbol for the level 1
+    // table (containing just the raw symbols, up to length 7).
+    uint64_t level1_counts[kNumRawSymbols + 1];
+    memcpy(level1_counts, raw_counts, kNumRawSymbols * sizeof(uint64_t));
+    size_t numraw = kNumRawSymbols;
+    while (numraw > 0 && level1_counts[numraw - 1] == 0) numraw--;
+
+    level1_counts[numraw] = 0;
+    for (size_t i = 0; i < kNumLZ77; i++) {
+      level1_counts[numraw] += lz77_counts[i];
+    }
+    uint8_t level1_nbits[kNumRawSymbols + 1] = {};
+    ComputeCodeLengths(level1_counts, numraw + 1, BitDepth::kMinRawLength,
+                       BitDepth::kMaxRawLength, level1_nbits);
+
+    uint8_t level2_nbits[kNumLZ77] = {};
+    uint8_t min_lengths[kNumLZ77] = {};
+    uint8_t l = 15 - level1_nbits[numraw];
+    uint8_t max_lengths[kNumLZ77] = {
+        l, l, l, l, l, l, l, l, l, l, l, l, l, l, l, l, l,
+    };
+    size_t num_lz77 = kNumLZ77;
+    while (num_lz77 > 0 && lz77_counts[num_lz77 - 1] == 0) num_lz77--;
+    ComputeCodeLengths(lz77_counts, num_lz77, min_lengths, max_lengths,
+                       level2_nbits);
+    for (size_t i = 0; i < numraw; i++) {
+      raw_nbits[i] = level1_nbits[i];
+    }
+    for (size_t i = 0; i < num_lz77; i++) {
+      lz77_nbits[i] =
+          level2_nbits[i] ? level1_nbits[numraw] + level2_nbits[i] : 0;
+    }
+
+    ComputeCanonicalCode(raw_nbits, raw_bits, numraw, lz77_nbits, lz77_bits,
+                         kNumLZ77);
+    BitDepth::PrepareForSimd(raw_nbits, raw_bits, numraw, raw_nbits_simd,
+                             raw_bits_simd);
+  }
+
+  void WriteTo(BitWriter* writer, size_t chunk_size) const {
+    uint64_t code_length_counts[18] = {};
+    code_length_counts[17] = 3 + 2 * (kNumLZ77 - 1);
+    for (size_t i = 0; i < kNumRawSymbols; i++) {
+      code_length_counts[raw_nbits[i]]++;
+    }
+    for (size_t i = 0; i < kNumLZ77; i++) {
+      code_length_counts[lz77_nbits[i]]++;
+    }
+    uint8_t code_length_nbits[18] = {};
+    uint8_t code_length_nbits_min[18] = {};
+    uint8_t code_length_nbits_max[18] = {
+        5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
+    };
+    ComputeCodeLengths(code_length_counts, 18, code_length_nbits_min,
+                       code_length_nbits_max, code_length_nbits);
+    writer->Write(2, 0b00);  // HSKIP = 0, i.e. don't skip code lengths.
+
+    // As per Brotli RFC.
+    uint8_t code_length_order[18] = {1, 2, 3, 4,  0,  5,  17, 6,  16,
+                                     7, 8, 9, 10, 11, 12, 13, 14, 15};
+    uint8_t code_length_length_nbits[] = {2, 4, 3, 2, 2, 4};
+    uint8_t code_length_length_bits[] = {0, 7, 3, 2, 1, 15};
+
+    // Encode lengths of code lengths.
+    size_t num_code_lengths = 18;
+    while (code_length_nbits[code_length_order[num_code_lengths - 1]] == 0) {
+      num_code_lengths--;
+    }
+    for (size_t i = 0; i < num_code_lengths; i++) {
+      int symbol = code_length_nbits[code_length_order[i]];
+      writer->Write(code_length_length_nbits[symbol],
+                    code_length_length_bits[symbol]);
+    }
+
+    // Compute the canonical codes for the codes that represent the lengths of
+    // the actual codes for data.
+    uint16_t code_length_bits[18] = {};
+    ComputeCanonicalCode(nullptr, nullptr, 0, code_length_nbits,
+                         code_length_bits, 18);
+    // Encode raw bit code lengths.
+    for (size_t i = 0; i < kNumRawSymbols; i++) {
+      writer->Write(code_length_nbits[raw_nbits[i]],
+                    code_length_bits[raw_nbits[i]]);
+    }
+    size_t num_lz77 = kNumLZ77;
+    while (lz77_nbits[num_lz77 - 1] == 0) {
+      num_lz77--;
+    }
+    // Encode 0s until 224 (start of LZ77 symbols). This is in total 224-19 =
+    // 205.
+    static_assert(kLZ77Offset == 224, "");
+    static_assert(kNumRawSymbols == 19, "");
+    writer->Write(code_length_nbits[17], code_length_bits[17]);
+    writer->Write(3, 0b010);  // 5
+    writer->Write(code_length_nbits[17], code_length_bits[17]);
+    writer->Write(3, 0b000);  // (5-2)*8 + 3 = 27
+    writer->Write(code_length_nbits[17], code_length_bits[17]);
+    writer->Write(3, 0b010);  // (27-2)*8 + 5 = 205
+    // Encode LZ77 symbols, with values 224+i*16.
+    for (size_t i = 0; i < num_lz77; i++) {
+      writer->Write(code_length_nbits[lz77_nbits[i]],
+                    code_length_bits[lz77_nbits[i]]);
+      if (i != num_lz77 - 1) {
+        if (chunk_size == 16) {
+          // Encode gap between LZ77 symbols: 15 zeros.
+          writer->Write(code_length_nbits[17], code_length_bits[17]);
+          writer->Write(3, 0b000);  // 3
+          writer->Write(code_length_nbits[17], code_length_bits[17]);
+          writer->Write(3, 0b100);  // (3-2)*8+7 = 15
+        } else if (chunk_size == 8) {
+          // 7 zeros
+          writer->Write(code_length_nbits[17], code_length_bits[17]);
+          writer->Write(3, 0b100);  // 7
+        } else {
+          assert(chunk_size == 32);
+          // 31 zeros
+          writer->Write(code_length_nbits[17], code_length_bits[17]);
+          writer->Write(3, 0b010);  // 5
+          writer->Write(code_length_nbits[17], code_length_bits[17]);
+          writer->Write(3, 0b100);  // (5-2)*8+7 = 31
+        }
+      }
+    }
+  }
+};
+
 }  // namespace
 
 extern "C" {
@@ -453,277 +727,6 @@ void JxlFastLosslessFreeFrameState(JxlFastLosslessFrameState* frame) {
 
 namespace {
 
-constexpr size_t kNumRawSymbols = 19;
-
-constexpr size_t kLZ77Offset = 224;
-
-struct PrefixCode {
-  static constexpr size_t kNumLZ77 = 17;
-
-  uint8_t raw_nbits[kNumRawSymbols] = {};
-  uint8_t raw_bits[kNumRawSymbols] = {};
-
-  alignas(64) uint8_t raw_nbits_simd[16] = {};
-  alignas(64) uint8_t raw_bits_simd[16] = {};
-
-  uint8_t lz77_nbits[kNumLZ77] = {};
-  uint16_t lz77_bits[kNumLZ77] = {};
-
-  static uint16_t BitReverse(size_t nbits, uint16_t bits) {
-    constexpr uint16_t kNibbleLookup[16] = {
-        0b0000, 0b1000, 0b0100, 0b1100, 0b0010, 0b1010, 0b0110, 0b1110,
-        0b0001, 0b1001, 0b0101, 0b1101, 0b0011, 0b1011, 0b0111, 0b1111,
-    };
-    uint16_t rev16 = (kNibbleLookup[bits & 0xF] << 12) |
-                     (kNibbleLookup[(bits >> 4) & 0xF] << 8) |
-                     (kNibbleLookup[(bits >> 8) & 0xF] << 4) |
-                     (kNibbleLookup[bits >> 12]);
-    return rev16 >> (16 - nbits);
-  }
-
-  // Create the prefix codes given the code lengths.
-  // Supports the code lengths being split into two halves.
-  static void ComputeCanonicalCode(const uint8_t* first_chunk_nbits,
-                                   uint8_t* first_chunk_bits,
-                                   size_t first_chunk_size,
-                                   const uint8_t* second_chunk_nbits,
-                                   uint16_t* second_chunk_bits,
-                                   size_t second_chunk_size) {
-    constexpr size_t kMaxCodeLength = 15;
-    uint8_t code_length_counts[kMaxCodeLength + 1] = {};
-    for (size_t i = 0; i < first_chunk_size; i++) {
-      code_length_counts[first_chunk_nbits[i]]++;
-      assert(first_chunk_nbits[i] <= kMaxCodeLength);
-      assert(first_chunk_nbits[i] <= 8);
-      assert(first_chunk_nbits[i] > 0);
-    }
-    for (size_t i = 0; i < second_chunk_size; i++) {
-      code_length_counts[second_chunk_nbits[i]]++;
-      assert(second_chunk_nbits[i] <= kMaxCodeLength);
-    }
-
-    uint16_t next_code[kMaxCodeLength + 1] = {};
-
-    uint16_t code = 0;
-    for (size_t i = 1; i < kMaxCodeLength + 1; i++) {
-      code = (code + code_length_counts[i - 1]) << 1;
-      next_code[i] = code;
-    }
-
-    for (size_t i = 0; i < first_chunk_size; i++) {
-      first_chunk_bits[i] =
-          BitReverse(first_chunk_nbits[i], next_code[first_chunk_nbits[i]]++);
-    }
-    for (size_t i = 0; i < second_chunk_size; i++) {
-      second_chunk_bits[i] =
-          BitReverse(second_chunk_nbits[i], next_code[second_chunk_nbits[i]]++);
-    }
-  }
-
-  // Computes nbits[i] for i <= n, subject to min_limit[i] <= nbits[i] <=
-  // max_limit[i], so to minimize sum(nbits[i] * freqs[i]).
-  static void ComputeCodeLengthsNonZero(const uint64_t* freqs, size_t n,
-                                        uint8_t* min_limit, uint8_t* max_limit,
-                                        uint8_t* nbits) {
-    size_t precision = 0;
-    uint64_t freqsum = 0;
-    for (size_t i = 0; i < n; i++) {
-      assert(freqs[i] != 0);
-      freqsum += freqs[i];
-      if (min_limit[i] < 1) min_limit[i] = 1;
-      assert(min_limit[i] <= max_limit[i]);
-      precision = std::max<size_t>(max_limit[i], precision);
-    }
-    uint64_t infty = freqsum * precision;
-    std::vector<uint64_t> dynp(((1U << precision) + 1) * (n + 1), infty);
-    auto d = [&](size_t sym, size_t off) -> uint64_t& {
-      return dynp[sym * ((1 << precision) + 1) + off];
-    };
-    d(0, 0) = 0;
-    for (size_t sym = 0; sym < n; sym++) {
-      for (size_t bits = min_limit[sym]; bits <= max_limit[sym]; bits++) {
-        size_t off_delta = 1U << (precision - bits);
-        for (size_t off = 0; off + off_delta <= (1U << precision); off++) {
-          d(sym + 1, off + off_delta) = std::min(
-              d(sym, off) + freqs[sym] * bits, d(sym + 1, off + off_delta));
-        }
-      }
-    }
-
-    size_t sym = n;
-    size_t off = 1U << precision;
-
-    assert(d(sym, off) != infty);
-
-    while (sym-- > 0) {
-      assert(off > 0);
-      for (size_t bits = min_limit[sym]; bits <= max_limit[sym]; bits++) {
-        size_t off_delta = 1U << (precision - bits);
-        if (off_delta <= off &&
-            d(sym + 1, off) == d(sym, off - off_delta) + freqs[sym] * bits) {
-          off -= off_delta;
-          nbits[sym] = bits;
-          break;
-        }
-      }
-    }
-  }
-  static void ComputeCodeLengths(const uint64_t* freqs, size_t n,
-                                 const uint8_t* min_limit_in,
-                                 const uint8_t* max_limit_in, uint8_t* nbits) {
-    assert(n <= kNumRawSymbols + 1);
-    uint64_t compact_freqs[kNumRawSymbols + 1];
-    uint8_t min_limit[kNumRawSymbols + 1];
-    uint8_t max_limit[kNumRawSymbols + 1];
-    size_t ni = 0;
-    for (size_t i = 0; i < n; i++) {
-      if (freqs[i]) {
-        compact_freqs[ni] = freqs[i];
-        min_limit[ni] = min_limit_in[i];
-        max_limit[ni] = max_limit_in[i];
-        ni++;
-      }
-    }
-    uint8_t num_bits[kNumRawSymbols + 1] = {};
-    ComputeCodeLengthsNonZero(compact_freqs, ni, min_limit, max_limit,
-                              num_bits);
-    ni = 0;
-    for (size_t i = 0; i < n; i++) {
-      nbits[i] = 0;
-      if (freqs[i]) {
-        nbits[i] = num_bits[ni++];
-      }
-    }
-  }
-
-  template <typename BitDepth>
-  PrefixCode(BitDepth, uint64_t* raw_counts, uint64_t* lz77_counts) {
-    // "merge" together all the lz77 counts in a single symbol for the level 1
-    // table (containing just the raw symbols, up to length 7).
-    uint64_t level1_counts[kNumRawSymbols + 1];
-    memcpy(level1_counts, raw_counts, kNumRawSymbols * sizeof(uint64_t));
-    size_t numraw = kNumRawSymbols;
-    while (numraw > 0 && level1_counts[numraw - 1] == 0) numraw--;
-
-    level1_counts[numraw] = 0;
-    for (size_t i = 0; i < kNumLZ77; i++) {
-      level1_counts[numraw] += lz77_counts[i];
-    }
-    uint8_t level1_nbits[kNumRawSymbols + 1] = {};
-    ComputeCodeLengths(level1_counts, numraw + 1, BitDepth::kMinRawLength,
-                       BitDepth::kMaxRawLength, level1_nbits);
-
-    uint8_t level2_nbits[kNumLZ77] = {};
-    uint8_t min_lengths[kNumLZ77] = {};
-    uint8_t l = 15 - level1_nbits[numraw];
-    uint8_t max_lengths[kNumLZ77] = {
-        l, l, l, l, l, l, l, l, l, l, l, l, l, l, l, l, l,
-    };
-    size_t num_lz77 = kNumLZ77;
-    while (num_lz77 > 0 && lz77_counts[num_lz77 - 1] == 0) num_lz77--;
-    ComputeCodeLengths(lz77_counts, num_lz77, min_lengths, max_lengths,
-                       level2_nbits);
-    for (size_t i = 0; i < numraw; i++) {
-      raw_nbits[i] = level1_nbits[i];
-    }
-    for (size_t i = 0; i < num_lz77; i++) {
-      lz77_nbits[i] =
-          level2_nbits[i] ? level1_nbits[numraw] + level2_nbits[i] : 0;
-    }
-
-    ComputeCanonicalCode(raw_nbits, raw_bits, numraw, lz77_nbits, lz77_bits,
-                         kNumLZ77);
-    BitDepth::PrepareForSimd(raw_nbits, raw_bits, numraw, raw_nbits_simd,
-                             raw_bits_simd);
-  }
-
-  void WriteTo(BitWriter* writer, size_t chunk_size) const {
-    uint64_t code_length_counts[18] = {};
-    code_length_counts[17] = 3 + 2 * (kNumLZ77 - 1);
-    for (size_t i = 0; i < kNumRawSymbols; i++) {
-      code_length_counts[raw_nbits[i]]++;
-    }
-    for (size_t i = 0; i < kNumLZ77; i++) {
-      code_length_counts[lz77_nbits[i]]++;
-    }
-    uint8_t code_length_nbits[18] = {};
-    uint8_t code_length_nbits_min[18] = {};
-    uint8_t code_length_nbits_max[18] = {
-        5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
-    };
-    ComputeCodeLengths(code_length_counts, 18, code_length_nbits_min,
-                       code_length_nbits_max, code_length_nbits);
-    writer->Write(2, 0b00);  // HSKIP = 0, i.e. don't skip code lengths.
-
-    // As per Brotli RFC.
-    uint8_t code_length_order[18] = {1, 2, 3, 4,  0,  5,  17, 6,  16,
-                                     7, 8, 9, 10, 11, 12, 13, 14, 15};
-    uint8_t code_length_length_nbits[] = {2, 4, 3, 2, 2, 4};
-    uint8_t code_length_length_bits[] = {0, 7, 3, 2, 1, 15};
-
-    // Encode lengths of code lengths.
-    size_t num_code_lengths = 18;
-    while (code_length_nbits[code_length_order[num_code_lengths - 1]] == 0) {
-      num_code_lengths--;
-    }
-    for (size_t i = 0; i < num_code_lengths; i++) {
-      int symbol = code_length_nbits[code_length_order[i]];
-      writer->Write(code_length_length_nbits[symbol],
-                    code_length_length_bits[symbol]);
-    }
-
-    // Compute the canonical codes for the codes that represent the lengths of
-    // the actual codes for data.
-    uint16_t code_length_bits[18] = {};
-    ComputeCanonicalCode(nullptr, nullptr, 0, code_length_nbits,
-                         code_length_bits, 18);
-    // Encode raw bit code lengths.
-    for (size_t i = 0; i < kNumRawSymbols; i++) {
-      writer->Write(code_length_nbits[raw_nbits[i]],
-                    code_length_bits[raw_nbits[i]]);
-    }
-    size_t num_lz77 = kNumLZ77;
-    while (lz77_nbits[num_lz77 - 1] == 0) {
-      num_lz77--;
-    }
-    // Encode 0s until 224 (start of LZ77 symbols). This is in total 224-19 =
-    // 205.
-    static_assert(kLZ77Offset == 224, "");
-    static_assert(kNumRawSymbols == 19, "");
-    writer->Write(code_length_nbits[17], code_length_bits[17]);
-    writer->Write(3, 0b010);  // 5
-    writer->Write(code_length_nbits[17], code_length_bits[17]);
-    writer->Write(3, 0b000);  // (5-2)*8 + 3 = 27
-    writer->Write(code_length_nbits[17], code_length_bits[17]);
-    writer->Write(3, 0b010);  // (27-2)*8 + 5 = 205
-    // Encode LZ77 symbols, with values 224+i*16.
-    for (size_t i = 0; i < num_lz77; i++) {
-      writer->Write(code_length_nbits[lz77_nbits[i]],
-                    code_length_bits[lz77_nbits[i]]);
-      if (i != num_lz77 - 1) {
-        if (chunk_size == 16) {
-          // Encode gap between LZ77 symbols: 15 zeros.
-          writer->Write(code_length_nbits[17], code_length_bits[17]);
-          writer->Write(3, 0b000);  // 3
-          writer->Write(code_length_nbits[17], code_length_bits[17]);
-          writer->Write(3, 0b100);  // (3-2)*8+7 = 15
-        } else if (chunk_size == 8) {
-          // 7 zeros
-          writer->Write(code_length_nbits[17], code_length_bits[17]);
-          writer->Write(3, 0b100);  // 7
-        } else {
-          assert(chunk_size == 32);
-          // 31 zeros
-          writer->Write(code_length_nbits[17], code_length_bits[17]);
-          writer->Write(3, 0b010);  // 5
-          writer->Write(code_length_nbits[17], code_length_bits[17]);
-          writer->Write(3, 0b100);  // (5-2)*8+7 = 31
-        }
-      }
-    }
-  }
-};
-
 template <typename T>
 struct VecPair {
   T low;
@@ -752,7 +755,7 @@ struct SIMDVec32 {
     return SIMDVec32{_mm512_loadu_si512((__m512i*)data)};
   }
   FJXL_INLINE void Store(uint32_t* data) {
-    _mm512_store_si512((__m512i*)data, vec);
+    _mm512_storeu_si512((__m512i*)data, vec);
   }
   FJXL_INLINE static SIMDVec32 Val(uint32_t v) {
     return SIMDVec32{_mm512_set1_epi32(v)};
@@ -783,6 +786,10 @@ struct SIMDVec32 {
   FJXL_INLINE SIMDVec32 Pow2() const {
     return SIMDVec32{_mm512_sllv_epi32(_mm512_set1_epi32(1), vec)};
   }
+  template <size_t i>
+  FJXL_INLINE SIMDVec32 SignedShiftRight() const {
+    return SIMDVec32{_mm512_srai_epi32(vec, i)};
+  }
 };
 
 struct SIMDVec16;
@@ -805,7 +812,7 @@ struct SIMDVec16 {
     return SIMDVec16{_mm512_loadu_si512((__m512i*)data)};
   }
   FJXL_INLINE void Store(uint16_t* data) {
-    _mm512_store_si512((__m512i*)data, vec);
+    _mm512_storeu_si512((__m512i*)data, vec);
   }
   FJXL_INLINE static SIMDVec16 Val(uint16_t v) {
     return SIMDVec16{_mm512_set1_epi16(v)};
@@ -889,6 +896,141 @@ struct SIMDVec16 {
             SIMDVec32{_mm512_permutex2var_epi64(
                 lo, _mm512_load_si512((__m512i*)perm2), hi)}};
   }
+  template <size_t i>
+  FJXL_INLINE SIMDVec16 SignedShiftRight() const {
+    return SIMDVec16{_mm512_srai_epi16(vec, i)};
+  }
+
+  static std::array<SIMDVec16, 1> LoadG8(const unsigned char* data) {
+    __m256i bytes = _mm256_loadu_si256((__m256i*)data);
+    return {SIMDVec16{_mm512_cvtepu8_epi16(bytes)}};
+  }
+  static std::array<SIMDVec16, 1> LoadG16(const unsigned char* data) {
+    return {Load((const uint16_t*)data)};
+  }
+
+  static std::array<SIMDVec16, 2> LoadGA8(const unsigned char* data) {
+    __m512i bytes = _mm512_loadu_si512((__m512i*)data);
+    __m512i gray = _mm512_and_si512(bytes, _mm512_set1_epi16(0xFF));
+    __m512i alpha = _mm512_srli_epi16(bytes, 8);
+    return {SIMDVec16{gray}, SIMDVec16{alpha}};
+  }
+  static std::array<SIMDVec16, 2> LoadGA16(const unsigned char* data) {
+    __m512i bytes1 = _mm512_loadu_si512((__m512i*)data);
+    __m512i bytes2 = _mm512_loadu_si512((__m512i*)(data + 64));
+    __m512i g_mask = _mm512_set1_epi32(0xFFFF);
+    __m512i permuteidx = _mm512_set_epi64(7, 5, 3, 1, 6, 4, 2, 0);
+    __m512i g = _mm512_permutexvar_epi64(
+        permuteidx, _mm512_packus_epi32(_mm512_and_si512(bytes1, g_mask),
+                                        _mm512_and_si512(bytes2, g_mask)));
+    __m512i a = _mm512_permutexvar_epi64(
+        permuteidx, _mm512_packus_epi32(_mm512_srli_epi32(bytes1, 16),
+                                        _mm512_srli_epi32(bytes2, 16)));
+    return {SIMDVec16{g}, SIMDVec16{a}};
+  }
+
+  static std::array<SIMDVec16, 3> LoadRGB8(const unsigned char* data) {
+    __m512i bytes0 = _mm512_loadu_si512((__m512i*)data);
+    __m512i bytes1 =
+        _mm512_zextsi256_si512(_mm256_loadu_si256((__m256i*)(data + 64)));
+
+    // 0x7A = element of upper half of second vector = 0 after lookup; still in
+    // the upper half once we add 1 or 2.
+    uint8_t z = 0x7A;
+    __m512i ridx =
+        _mm512_set_epi8(z, 93, z, 90, z, 87, z, 84, z, 81, z, 78, z, 75, z, 72,
+                        z, 69, z, 66, z, 63, z, 60, z, 57, z, 54, z, 51, z, 48,
+                        z, 45, z, 42, z, 39, z, 36, z, 33, z, 30, z, 27, z, 24,
+                        z, 21, z, 18, z, 15, z, 12, z, 9, z, 6, z, 3, z, 0);
+    __m512i gidx = _mm512_add_epi8(ridx, _mm512_set1_epi8(1));
+    __m512i bidx = _mm512_add_epi8(gidx, _mm512_set1_epi8(1));
+    __m512i r = _mm512_permutex2var_epi8(bytes0, ridx, bytes1);
+    __m512i g = _mm512_permutex2var_epi8(bytes0, gidx, bytes1);
+    __m512i b = _mm512_permutex2var_epi8(bytes0, bidx, bytes1);
+    return {SIMDVec16{r}, SIMDVec16{g}, SIMDVec16{b}};
+  }
+  static std::array<SIMDVec16, 3> LoadRGB16(const unsigned char* data) {
+    __m512i bytes0 = _mm512_loadu_si512((__m512i*)data);
+    __m512i bytes1 = _mm512_loadu_si512((__m512i*)(data + 64));
+    __m512i bytes2 = _mm512_loadu_si512((__m512i*)(data + 128));
+
+    __m512i ridx_lo = _mm512_set_epi16(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 63, 60, 57,
+                                       54, 51, 48, 45, 42, 39, 36, 33, 30, 27,
+                                       24, 21, 18, 15, 12, 9, 6, 3, 0);
+    // -1 is such that when adding 1 or 2, we get the correct index for
+    // green/blue.
+    __m512i ridx_hi =
+        _mm512_set_epi16(29, 26, 23, 20, 17, 14, 11, 8, 5, 2, -1, 0, 0, 0, 0, 0,
+                         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    __m512i gidx_lo = _mm512_add_epi16(ridx_lo, _mm512_set1_epi16(1));
+    __m512i gidx_hi = _mm512_add_epi16(ridx_hi, _mm512_set1_epi16(1));
+    __m512i bidx_lo = _mm512_add_epi16(gidx_lo, _mm512_set1_epi16(1));
+    __m512i bidx_hi = _mm512_add_epi16(gidx_hi, _mm512_set1_epi16(1));
+
+    __mmask32 rmask = _cvtu32_mask32(0b11111111110000000000000000000000);
+    __mmask32 gbmask = _cvtu32_mask32(0b11111111111000000000000000000000);
+
+    __m512i rlo = _mm512_permutex2var_epi16(bytes0, ridx_lo, bytes1);
+    __m512i glo = _mm512_permutex2var_epi16(bytes0, gidx_lo, bytes1);
+    __m512i blo = _mm512_permutex2var_epi16(bytes0, bidx_lo, bytes1);
+    __m512i r = _mm512_mask_permutexvar_epi16(rlo, rmask, ridx_hi, bytes2);
+    __m512i g = _mm512_mask_permutexvar_epi16(glo, gbmask, gidx_hi, bytes2);
+    __m512i b = _mm512_mask_permutexvar_epi16(blo, gbmask, bidx_hi, bytes2);
+    return {SIMDVec16{r}, SIMDVec16{g}, SIMDVec16{b}};
+  }
+
+  static std::array<SIMDVec16, 4> LoadRGBA8(const unsigned char* data) {
+    __m512i bytes1 = _mm512_loadu_si512((__m512i*)data);
+    __m512i bytes2 = _mm512_loadu_si512((__m512i*)(data + 64));
+    __m512i rg_mask = _mm512_set1_epi32(0xFFFF);
+    __m512i permuteidx = _mm512_set_epi64(7, 5, 3, 1, 6, 4, 2, 0);
+    __m512i rg = _mm512_permutexvar_epi64(
+        permuteidx, _mm512_packus_epi32(_mm512_and_si512(bytes1, rg_mask),
+                                        _mm512_and_si512(bytes2, rg_mask)));
+    __m512i ba = _mm512_permutexvar_epi64(
+        permuteidx, _mm512_packus_epi32(_mm512_srli_epi32(bytes1, 16),
+                                        _mm512_srli_epi32(bytes2, 16)));
+    __m512i r = _mm512_and_si512(rg, _mm512_set1_epi16(0xFF));
+    __m512i g = _mm512_srli_epi16(rg, 8);
+    __m512i b = _mm512_and_si512(ba, _mm512_set1_epi16(0xFF));
+    __m512i a = _mm512_srli_epi16(ba, 8);
+    return {SIMDVec16{r}, SIMDVec16{g}, SIMDVec16{b}, SIMDVec16{a}};
+  }
+  static std::array<SIMDVec16, 4> LoadRGBA16(const unsigned char* data) {
+    __m512i bytes0 = _mm512_loadu_si512((__m512i*)data);
+    __m512i bytes1 = _mm512_loadu_si512((__m512i*)(data + 64));
+    __m512i bytes2 = _mm512_loadu_si512((__m512i*)(data + 128));
+    __m512i bytes3 = _mm512_loadu_si512((__m512i*)(data + 192));
+
+    auto pack32 = [](__m512i a, __m512i b) {
+      __m512i permuteidx = _mm512_set_epi64(7, 5, 3, 1, 6, 4, 2, 0);
+      return _mm512_permutexvar_epi64(permuteidx, _mm512_packus_epi32(a, b));
+    };
+    auto packlow32 = [&pack32](__m512i a, __m512i b) {
+      __m512i mask = _mm512_set1_epi32(0xFFFF);
+      return pack32(_mm512_and_si512(a, mask), _mm512_and_si512(b, mask));
+    };
+    auto packhi32 = [&pack32](__m512i a, __m512i b) {
+      return pack32(_mm512_srli_epi32(a, 16), _mm512_srli_epi32(b, 16));
+    };
+
+    __m512i rb0 = packlow32(bytes0, bytes1);
+    __m512i rb1 = packlow32(bytes2, bytes3);
+    __m512i ga0 = packhi32(bytes0, bytes1);
+    __m512i ga1 = packhi32(bytes2, bytes3);
+
+    __m512i r = packlow32(rb0, rb1);
+    __m512i g = packlow32(ga0, ga1);
+    __m512i b = packhi32(rb0, rb1);
+    __m512i a = packhi32(ga0, ga1);
+    return {SIMDVec16{r}, SIMDVec16{g}, SIMDVec16{b}, SIMDVec16{a}};
+  }
+
+  void SwapEndian() {
+    auto indices = _mm512_broadcast_i32x4(
+        _mm_setr_epi8(1, 0, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12, 15, 14));
+    vec = _mm512_shuffle_epi8(vec, indices);
+  }
 };
 
 SIMDVec16 Mask16::IfThenElse(const SIMDVec16& if_true,
@@ -908,8 +1050,8 @@ struct Bits64 {
   __m512i bits;
 
   FJXL_INLINE void Store(uint64_t* nbits_out, uint64_t* bits_out) {
-    _mm512_store_si512((__m512i*)nbits_out, nbits);
-    _mm512_store_si512((__m512i*)bits_out, bits);
+    _mm512_storeu_si512((__m512i*)nbits_out, nbits);
+    _mm512_storeu_si512((__m512i*)bits_out, bits);
   }
 };
 
@@ -989,7 +1131,7 @@ struct SIMDVec32 {
     return SIMDVec32{_mm256_loadu_si256((__m256i*)data)};
   }
   FJXL_INLINE void Store(uint32_t* data) {
-    _mm256_store_si256((__m256i*)data, vec);
+    _mm256_storeu_si256((__m256i*)data, vec);
   }
   FJXL_INLINE static SIMDVec32 Val(uint32_t v) {
     return SIMDVec32{_mm256_set1_epi32(v)};
@@ -1058,6 +1200,10 @@ struct SIMDVec32 {
   FJXL_INLINE Mask32 Gt(const SIMDVec32& oth) const {
     return Mask32{_mm256_cmpgt_epi32(vec, oth.vec)};
   }
+  template <size_t i>
+  FJXL_INLINE SIMDVec32 SignedShiftRight() const {
+    return SIMDVec32{_mm256_srai_epi32(vec, i)};
+  }
 };
 
 struct SIMDVec16;
@@ -1082,7 +1228,7 @@ struct SIMDVec16 {
     return SIMDVec16{_mm256_loadu_si256((__m256i*)data)};
   }
   FJXL_INLINE void Store(uint16_t* data) {
-    _mm256_store_si256((__m256i*)data, vec);
+    _mm256_storeu_si256((__m256i*)data, vec);
   }
   FJXL_INLINE static SIMDVec16 Val(uint16_t v) {
     return SIMDVec16{_mm256_set1_epi16(v)};
@@ -1190,6 +1336,181 @@ struct SIMDVec16 {
     return {SIMDVec32{_mm256_permute2x128_si256(v02, v13, 0x20)},
             SIMDVec32{_mm256_permute2x128_si256(v02, v13, 0x31)}};
   }
+  template <size_t i>
+  FJXL_INLINE SIMDVec16 SignedShiftRight() const {
+    return SIMDVec16{_mm256_srai_epi16(vec, i)};
+  }
+
+  static std::array<SIMDVec16, 1> LoadG8(const unsigned char* data) {
+    __m128i bytes = _mm_loadu_si128((__m128i*)data);
+    return {SIMDVec16{_mm256_cvtepu8_epi16(bytes)}};
+  }
+  static std::array<SIMDVec16, 1> LoadG16(const unsigned char* data) {
+    return {Load((const uint16_t*)data)};
+  }
+
+  static std::array<SIMDVec16, 2> LoadGA8(const unsigned char* data) {
+    __m256i bytes = _mm256_loadu_si256((__m256i*)data);
+    __m256i gray = _mm256_and_si256(bytes, _mm256_set1_epi16(0xFF));
+    __m256i alpha = _mm256_srli_epi16(bytes, 8);
+    return {SIMDVec16{gray}, SIMDVec16{alpha}};
+  }
+  static std::array<SIMDVec16, 2> LoadGA16(const unsigned char* data) {
+    __m256i bytes1 = _mm256_loadu_si256((__m256i*)data);
+    __m256i bytes2 = _mm256_loadu_si256((__m256i*)(data + 32));
+    __m256i g_mask = _mm256_set1_epi32(0xFFFF);
+    __m256i g = _mm256_permute4x64_epi64(
+        _mm256_packus_epi32(_mm256_and_si256(bytes1, g_mask),
+                            _mm256_and_si256(bytes2, g_mask)),
+        0b11011000);
+    __m256i a = _mm256_permute4x64_epi64(
+        _mm256_packus_epi32(_mm256_srli_epi32(bytes1, 16),
+                            _mm256_srli_epi32(bytes2, 16)),
+        0b11011000);
+    return {SIMDVec16{g}, SIMDVec16{a}};
+  }
+
+  static std::array<SIMDVec16, 3> LoadRGB8(const unsigned char* data) {
+    __m128i bytes0 = _mm_loadu_si128((__m128i*)data);
+    __m128i bytes1 = _mm_loadu_si128((__m128i*)(data + 16));
+    __m128i bytes2 = _mm_loadu_si128((__m128i*)(data + 32));
+
+    __m128i idx =
+        _mm_setr_epi8(0, 3, 6, 9, 12, 15, 2, 5, 8, 11, 14, 1, 4, 7, 10, 13);
+
+    __m128i r6b5g5_0 = _mm_shuffle_epi8(bytes0, idx);
+    __m128i g6r5b5_1 = _mm_shuffle_epi8(bytes1, idx);
+    __m128i b6g5r5_2 = _mm_shuffle_epi8(bytes2, idx);
+
+    __m128i mask010 = _mm_setr_epi8(0, 0, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF,
+                                    0xFF, 0, 0, 0, 0, 0);
+    __m128i mask001 = _mm_setr_epi8(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF,
+                                    0xFF, 0xFF, 0xFF);
+
+    __m128i b2g2b1 = _mm_blendv_epi8(b6g5r5_2, g6r5b5_1, mask001);
+    __m128i b2b0b1 = _mm_blendv_epi8(b2g2b1, r6b5g5_0, mask010);
+
+    __m128i r0r1b1 = _mm_blendv_epi8(r6b5g5_0, g6r5b5_1, mask010);
+    __m128i r0r1r2 = _mm_blendv_epi8(r0r1b1, b6g5r5_2, mask001);
+
+    __m128i g1r1g0 = _mm_blendv_epi8(g6r5b5_1, r6b5g5_0, mask001);
+    __m128i g1g2g0 = _mm_blendv_epi8(g1r1g0, b6g5r5_2, mask010);
+
+    __m128i g0g1g2 = _mm_alignr_epi8(g1g2g0, g1g2g0, 11);
+    __m128i b0b1b2 = _mm_alignr_epi8(b2b0b1, b2b0b1, 6);
+
+    return {SIMDVec16{_mm256_cvtepu8_epi16(r0r1r2)},
+            SIMDVec16{_mm256_cvtepu8_epi16(g0g1g2)},
+            SIMDVec16{_mm256_cvtepu8_epi16(b0b1b2)}};
+  }
+  static std::array<SIMDVec16, 3> LoadRGB16(const unsigned char* data) {
+    auto load_and_split_lohi = [](const unsigned char* data) {
+      // LHLHLH...
+      __m256i bytes = _mm256_loadu_si256((__m256i*)data);
+      // L0L0L0...
+      __m256i lo = _mm256_and_si256(bytes, _mm256_set1_epi16(0xFF));
+      // H0H0H0...
+      __m256i hi = _mm256_srli_epi16(bytes, 8);
+      // LLLLLLLLHHHHHHHHLLLLLLLLHHHHHHHH
+      __m256i packed = _mm256_packus_epi16(lo, hi);
+      return _mm256_permute4x64_epi64(packed, 0b11011000);
+    };
+    __m256i bytes0 = load_and_split_lohi(data);
+    __m256i bytes1 = load_and_split_lohi(data + 32);
+    __m256i bytes2 = load_and_split_lohi(data + 64);
+
+    __m256i idx = _mm256_broadcastsi128_si256(
+        _mm_setr_epi8(0, 3, 6, 9, 12, 15, 2, 5, 8, 11, 14, 1, 4, 7, 10, 13));
+
+    __m256i r6b5g5_0 = _mm256_shuffle_epi8(bytes0, idx);
+    __m256i g6r5b5_1 = _mm256_shuffle_epi8(bytes1, idx);
+    __m256i b6g5r5_2 = _mm256_shuffle_epi8(bytes2, idx);
+
+    __m256i mask010 = _mm256_broadcastsi128_si256(_mm_setr_epi8(
+        0, 0, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0, 0));
+    __m256i mask001 = _mm256_broadcastsi128_si256(_mm_setr_epi8(
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF));
+
+    __m256i b2g2b1 = _mm256_blendv_epi8(b6g5r5_2, g6r5b5_1, mask001);
+    __m256i b2b0b1 = _mm256_blendv_epi8(b2g2b1, r6b5g5_0, mask010);
+
+    __m256i r0r1b1 = _mm256_blendv_epi8(r6b5g5_0, g6r5b5_1, mask010);
+    __m256i r0r1r2 = _mm256_blendv_epi8(r0r1b1, b6g5r5_2, mask001);
+
+    __m256i g1r1g0 = _mm256_blendv_epi8(g6r5b5_1, r6b5g5_0, mask001);
+    __m256i g1g2g0 = _mm256_blendv_epi8(g1r1g0, b6g5r5_2, mask010);
+
+    __m256i g0g1g2 = _mm256_alignr_epi8(g1g2g0, g1g2g0, 11);
+    __m256i b0b1b2 = _mm256_alignr_epi8(b2b0b1, b2b0b1, 6);
+
+    // Now r0r1r2, g0g1g2, b0b1b2 have the low bytes of the RGB pixels in their
+    // lower half, and the high bytes in their upper half.
+
+    auto combine_low_hi = [](__m256i v) {
+      __m128i low = _mm256_extracti128_si256(v, 0);
+      __m128i hi = _mm256_extracti128_si256(v, 1);
+      __m256i low16 = _mm256_cvtepu8_epi16(low);
+      __m256i hi16 = _mm256_cvtepu8_epi16(hi);
+      return _mm256_or_si256(_mm256_slli_epi16(hi16, 8), low16);
+    };
+
+    return {SIMDVec16{combine_low_hi(r0r1r2)},
+            SIMDVec16{combine_low_hi(g0g1g2)},
+            SIMDVec16{combine_low_hi(b0b1b2)}};
+  }
+
+  static std::array<SIMDVec16, 4> LoadRGBA8(const unsigned char* data) {
+    __m256i bytes1 = _mm256_loadu_si256((__m256i*)data);
+    __m256i bytes2 = _mm256_loadu_si256((__m256i*)(data + 32));
+    __m256i rg_mask = _mm256_set1_epi32(0xFFFF);
+    __m256i rg = _mm256_permute4x64_epi64(
+        _mm256_packus_epi32(_mm256_and_si256(bytes1, rg_mask),
+                            _mm256_and_si256(bytes2, rg_mask)),
+        0b11011000);
+    __m256i ba = _mm256_permute4x64_epi64(
+        _mm256_packus_epi32(_mm256_srli_epi32(bytes1, 16),
+                            _mm256_srli_epi32(bytes2, 16)),
+        0b11011000);
+    __m256i r = _mm256_and_si256(rg, _mm256_set1_epi16(0xFF));
+    __m256i g = _mm256_srli_epi16(rg, 8);
+    __m256i b = _mm256_and_si256(ba, _mm256_set1_epi16(0xFF));
+    __m256i a = _mm256_srli_epi16(ba, 8);
+    return {SIMDVec16{r}, SIMDVec16{g}, SIMDVec16{b}, SIMDVec16{a}};
+  }
+  static std::array<SIMDVec16, 4> LoadRGBA16(const unsigned char* data) {
+    __m256i bytes0 = _mm256_loadu_si256((__m256i*)data);
+    __m256i bytes1 = _mm256_loadu_si256((__m256i*)(data + 32));
+    __m256i bytes2 = _mm256_loadu_si256((__m256i*)(data + 64));
+    __m256i bytes3 = _mm256_loadu_si256((__m256i*)(data + 96));
+
+    auto pack32 = [](__m256i a, __m256i b) {
+      return _mm256_permute4x64_epi64(_mm256_packus_epi32(a, b), 0b11011000);
+    };
+    auto packlow32 = [&pack32](__m256i a, __m256i b) {
+      __m256i mask = _mm256_set1_epi32(0xFFFF);
+      return pack32(_mm256_and_si256(a, mask), _mm256_and_si256(b, mask));
+    };
+    auto packhi32 = [&pack32](__m256i a, __m256i b) {
+      return pack32(_mm256_srli_epi32(a, 16), _mm256_srli_epi32(b, 16));
+    };
+
+    __m256i rb0 = packlow32(bytes0, bytes1);
+    __m256i rb1 = packlow32(bytes2, bytes3);
+    __m256i ga0 = packhi32(bytes0, bytes1);
+    __m256i ga1 = packhi32(bytes2, bytes3);
+
+    __m256i r = packlow32(rb0, rb1);
+    __m256i g = packlow32(ga0, ga1);
+    __m256i b = packhi32(rb0, rb1);
+    __m256i a = packhi32(ga0, ga1);
+    return {SIMDVec16{r}, SIMDVec16{g}, SIMDVec16{b}, SIMDVec16{a}};
+  }
+
+  void SwapEndian() {
+    auto indices = _mm256_broadcastsi128_si256(
+        _mm_setr_epi8(1, 0, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12, 15, 14));
+    vec = _mm256_shuffle_epi8(vec, indices);
+  }
 };
 
 SIMDVec16 Mask16::IfThenElse(const SIMDVec16& if_true,
@@ -1209,8 +1530,8 @@ struct Bits64 {
   __m256i bits;
 
   FJXL_INLINE void Store(uint64_t* nbits_out, uint64_t* bits_out) {
-    _mm256_store_si256((__m256i*)nbits_out, nbits);
-    _mm256_store_si256((__m256i*)bits_out, bits);
+    _mm256_storeu_si256((__m256i*)nbits_out, nbits);
+    _mm256_storeu_si256((__m256i*)bits_out, bits);
   }
 };
 
@@ -1330,6 +1651,11 @@ struct SIMDVec32 {
     return Mask32{
         vcgtq_s32(vreinterpretq_s32_u32(vec), vreinterpretq_s32_u32(oth.vec))};
   }
+  template <size_t i>
+  FJXL_INLINE SIMDVec32 SignedShiftRight() const {
+    return SIMDVec32{
+        vreinterpretq_u32_s32(vshrq_n_s32(vreinterpretq_s32_u32(vec), i))};
+  }
 };
 
 struct SIMDVec16;
@@ -1415,6 +1741,53 @@ struct SIMDVec16 {
     uint32x4_t lo = vmovl_u16(vget_low_u16(vec));
     uint32x4_t hi = vmovl_high_u16(vec);
     return {SIMDVec32{lo}, SIMDVec32{hi}};
+  }
+  template <size_t i>
+  FJXL_INLINE SIMDVec16 SignedShiftRight() const {
+    return SIMDVec16{
+        vreinterpretq_u16_s16(vshrq_n_s16(vreinterpretq_s16_u16(vec), i))};
+  }
+
+  static std::array<SIMDVec16, 1> LoadG8(const unsigned char* data) {
+    uint8x8_t v = vld1_u8(data);
+    return {SIMDVec16{vmovl_u8(v)}};
+  }
+  static std::array<SIMDVec16, 1> LoadG16(const unsigned char* data) {
+    return {Load((const uint16_t*)data)};
+  }
+
+  static std::array<SIMDVec16, 2> LoadGA8(const unsigned char* data) {
+    uint8x8x2_t v = vld2_u8(data);
+    return {SIMDVec16{vmovl_u8(v.val[0])}, SIMDVec16{vmovl_u8(v.val[1])}};
+  }
+  static std::array<SIMDVec16, 2> LoadGA16(const unsigned char* data) {
+    uint16x8x2_t v = vld2q_u16((const uint16_t*)data);
+    return {SIMDVec16{v.val[0]}, SIMDVec16{v.val[1]}};
+  }
+
+  static std::array<SIMDVec16, 3> LoadRGB8(const unsigned char* data) {
+    uint8x8x3_t v = vld3_u8(data);
+    return {SIMDVec16{vmovl_u8(v.val[0])}, SIMDVec16{vmovl_u8(v.val[1])},
+            SIMDVec16{vmovl_u8(v.val[2])}};
+  }
+  static std::array<SIMDVec16, 3> LoadRGB16(const unsigned char* data) {
+    uint16x8x3_t v = vld3q_u16((const uint16_t*)data);
+    return {SIMDVec16{v.val[0]}, SIMDVec16{v.val[1]}, SIMDVec16{v.val[2]}};
+  }
+
+  static std::array<SIMDVec16, 4> LoadRGBA8(const unsigned char* data) {
+    uint8x8x4_t v = vld4_u8(data);
+    return {SIMDVec16{vmovl_u8(v.val[0])}, SIMDVec16{vmovl_u8(v.val[1])},
+            SIMDVec16{vmovl_u8(v.val[2])}, SIMDVec16{vmovl_u8(v.val[3])}};
+  }
+  static std::array<SIMDVec16, 4> LoadRGBA16(const unsigned char* data) {
+    uint16x8x4_t v = vld4q_u16((const uint16_t*)data);
+    return {SIMDVec16{v.val[0]}, SIMDVec16{v.val[1]}, SIMDVec16{v.val[2]},
+            SIMDVec16{v.val[3]}};
+  }
+
+  void SwapEndian() {
+    vec = vreinterpretq_u16_u8(vrev16q_u8(vreinterpretq_u8_u16(vec)));
   }
 };
 
@@ -1741,9 +2114,12 @@ struct UpTo8Bits {
   explicit UpTo8Bits(size_t bitdepth) : bitdepth(bitdepth) {
     assert(bitdepth <= 8);
   }
-  // Here we can fit up to 9 extra bits + 7 Huffman bits in a u16.
-  // Last symbol is used for LZ77 lengths and has no limitations except allowing
-  // to represent 32 symbols in total.
+  // Here we can fit up to 9 extra bits + 7 Huffman bits in a u16; for all other
+  // symbols, we could actually go up to 8 Huffman bits as we have at most 8
+  // extra bits; however, the SIMD bit merging logic for AVX2 assumes that no
+  // Huffman length is 8 or more, so we cap at 8 anyway. Last symbol is used for
+  // LZ77 lengths and has no limitations except allowing to represent 32 symbols
+  // in total.
   static constexpr uint8_t kMinRawLength[12] = {};
   static constexpr uint8_t kMaxRawLength[12] = {
       7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 10,
@@ -1983,23 +2359,34 @@ constexpr uint8_t MoreThan14Bits::kMinRawLength[];
 constexpr uint8_t MoreThan14Bits::kMaxRawLength[];
 
 void PrepareDCGlobalCommon(bool is_single_group, size_t width, size_t height,
-                           const PrefixCode& code, BitWriter* output) {
+                           const PrefixCode code[4], BitWriter* output) {
   output->Allocate(100000 + (is_single_group ? width * height * 16 : 0));
   // No patches, spline or noise.
   output->Write(1, 1);  // default DC dequantization factors (?)
   output->Write(1, 1);  // use global tree / histograms
   output->Write(1, 0);  // no lz77 for the tree
 
-  output->Write(1, 1);   // simple code for the tree's context map
-  output->Write(2, 0);   // all contexts clustered together
-  output->Write(1, 1);   // use prefix code for tree
-  output->Write(4, 15);  // don't do hybriduint for tree - 2 symbols anyway
-  output->Write(7, 0b0100101);  // Alphabet size is 6: we need 0 and 5 (var16)
-  output->Write(2, 1);          // simple prefix code
-  output->Write(2, 1);          // with two symbols
-  output->Write(3, 0);          // 0
-  output->Write(3, 5);          // 5
-  output->Write(5, 0b00010);    // tree repr: predictor is 5, all else 0
+  output->Write(1, 1);         // simple code for the tree's context map
+  output->Write(2, 0);         // all contexts clustered together
+  output->Write(1, 1);         // use prefix code for tree
+  output->Write(4, 0);         // 000 hybrid uint
+  output->Write(6, 0b100011);  // Alphabet size is 4 (var16)
+  output->Write(2, 1);         // simple prefix code
+  output->Write(2, 3);         // with 4 symbols
+  output->Write(2, 0);
+  output->Write(2, 1);
+  output->Write(2, 2);
+  output->Write(2, 3);
+  output->Write(1, 0);  // First tree encoding option
+  // Huffman table + extra bits for the tree.
+  uint8_t symbol_bits[6] = {0b00, 0b10, 0b001, 0b101, 0b0011, 0b0111};
+  uint8_t symbol_nbits[6] = {2, 2, 3, 3, 4, 4};
+  // Write a tree with a leaf per channel, and gradient predictor for every
+  // leaf.
+  for (auto v : {1, 2, 1, 4, 1, 0, 0, 5, 0, 0, 0, 0, 5,
+                 0, 0, 0, 0, 5, 0, 0, 0, 0, 5, 0, 0, 0}) {
+    output->Write(symbol_nbits[v], symbol_bits[v]);
+  }
 
   output->Write(1, 1);     // Enable lz77 for the main bitstream
   output->Write(2, 0b00);  // lz77 offset 224
@@ -2017,24 +2404,34 @@ void PrepareDCGlobalCommon(bool is_single_group, size_t width, size_t height,
   output->Write(4, kLogChunkSize);           // kLogChunkSize
   output->Write(hu_bits_sb, 0);              // 0
   output->Write(hu_bits_sb, kLogChunkSize);  // kLogChunkSize
-  output->Write(1, 1);                       // simple code for the context map
-  output->Write(2, 1);                       // two clusters
-  output->Write(1, 1);                       // raw/lz77 length histogram last
-  output->Write(1, 0);                       // distance histogram first
-  output->Write(1, 1);                       // use prefix codes
+
+  output->Write(1, 1);  // simple code for the context map
+  output->Write(2, 3);  // 3 bits per entry
+  output->Write(3, 4);  // channel 3
+  output->Write(3, 3);  // channel 2
+  output->Write(3, 2);  // channel 1
+  output->Write(3, 1);  // channel 0
+  output->Write(3, 0);  // distance histogram first
+
+  output->Write(1, 1);  // use prefix codes
   output->Write(4, 0);  // 000 hybrid uint config for distances (only need 0)
-  output->Write(4, 0);  // 000 hybrid uint config for symbols (only <= 10)
+  for (size_t i = 0; i < 4; i++) {
+    output->Write(4, 0);  // 000 hybrid uint config for symbols (only <= 10)
+  }
+
   // Distance alphabet size:
   output->Write(5, 0b00001);  // 2: just need 1 for RLE (i.e. distance 1)
   // Symbol + LZ77 alphabet size:
-  if (kChunkSize < 32) {
-    output->Write(1, 1);    // > 1
-    output->Write(4, 8);    // <= 512
-    output->Write(8, 255);  // == 512
-  } else {
-    output->Write(1, 1);    // > 1
-    output->Write(4, 9);    // <= 1024
-    output->Write(9, 511);  // == 1024
+  for (size_t i = 0; i < 4; i++) {
+    if (kChunkSize < 32) {
+      output->Write(1, 1);    // > 1
+      output->Write(4, 8);    // <= 512
+      output->Write(8, 255);  // == 512
+    } else {
+      output->Write(1, 1);    // > 1
+      output->Write(4, 9);    // <= 1024
+      output->Write(9, 511);  // == 1024
+    }
   }
 
   // Distance histogram:
@@ -2043,7 +2440,9 @@ void PrepareDCGlobalCommon(bool is_single_group, size_t width, size_t height,
   output->Write(1, 1);  // 1
 
   // Symbol + lz77 histogram:
-  code.WriteTo(output, kChunkSize);
+  for (size_t i = 0; i < 4; i++) {
+    code[i].WriteTo(output, kChunkSize);
+  }
 
   // Group header for global modular image.
   output->Write(1, 1);  // Global tree
@@ -2051,7 +2450,7 @@ void PrepareDCGlobalCommon(bool is_single_group, size_t width, size_t height,
 }
 
 void PrepareDCGlobal(bool is_single_group, size_t width, size_t height,
-                     size_t nb_chans, const PrefixCode& code,
+                     size_t nb_chans, const PrefixCode code[4],
                      BitWriter* output) {
   PrepareDCGlobalCommon(is_single_group, width, height, code, output);
   if (nb_chans > 2) {
@@ -2192,107 +2591,337 @@ struct ChannelRowProcessor {
   upixel_t last = std::numeric_limits<upixel_t>::max();  // Can never appear
 };
 
-template <typename Processor, size_t nb_chans, typename BitDepth,
-          bool big_endian>
+uint16_t LoadLE16(const unsigned char* ptr) {
+  return uint16_t{ptr[0]} | (uint16_t{ptr[1]} << 8);
+}
+
+uint16_t SwapEndian(uint16_t in) { return (in >> 8) | (in << 8); }
+
+#ifdef FJXL_GENERIC_SIMD
+void StorePixels(SIMDVec16 p, int16_t* dest) { p.Store((uint16_t*)dest); }
+
+void StorePixels(SIMDVec16 p, int32_t* dest) {
+  VecPair<SIMDVec32> p_up = p.Upcast();
+  p_up.low.Store((uint32_t*)dest);
+  p_up.hi.Store((uint32_t*)dest + SIMDVec32::kLanes);
+}
+#endif
+
+template <typename pixel_t>
+void FillRowG8(const unsigned char* rgba, size_t oxs, pixel_t* luma) {
+  size_t x = 0;
+#ifdef FJXL_GENERIC_SIMD
+  for (; x + SIMDVec16::kLanes <= oxs; x += SIMDVec16::kLanes) {
+    auto rgb = SIMDVec16::LoadG8(rgba + x);
+    StorePixels(rgb[0], luma + x);
+  }
+#endif
+  for (; x < oxs; x++) {
+    luma[x] = rgba[x];
+  }
+}
+
+template <bool big_endian, typename pixel_t>
+void FillRowG16(const unsigned char* rgba, size_t oxs, pixel_t* luma) {
+  size_t x = 0;
+#ifdef FJXL_GENERIC_SIMD
+  for (; x + SIMDVec16::kLanes <= oxs; x += SIMDVec16::kLanes) {
+    auto rgb = SIMDVec16::LoadG16(rgba + 2 * x);
+    if (big_endian) {
+      rgb[0].SwapEndian();
+    }
+    StorePixels(rgb[0], luma + x);
+  }
+#endif
+  for (; x < oxs; x++) {
+    uint16_t val = LoadLE16(rgba + 2 * x);
+    if (big_endian) {
+      val = SwapEndian(val);
+    }
+    luma[x] = val;
+  }
+}
+
+template <typename pixel_t>
+void FillRowGA8(const unsigned char* rgba, size_t oxs, pixel_t* luma,
+                pixel_t* alpha) {
+  size_t x = 0;
+#ifdef FJXL_GENERIC_SIMD
+  for (; x + SIMDVec16::kLanes <= oxs; x += SIMDVec16::kLanes) {
+    auto rgb = SIMDVec16::LoadGA8(rgba + 2 * x);
+    StorePixels(rgb[0], luma + x);
+    StorePixels(rgb[1], alpha + x);
+  }
+#endif
+  for (; x < oxs; x++) {
+    luma[x] = rgba[2 * x];
+    alpha[x] = rgba[2 * x + 1];
+  }
+}
+
+template <bool big_endian, typename pixel_t>
+void FillRowGA16(const unsigned char* rgba, size_t oxs, pixel_t* luma,
+                 pixel_t* alpha) {
+  size_t x = 0;
+#ifdef FJXL_GENERIC_SIMD
+  for (; x + SIMDVec16::kLanes <= oxs; x += SIMDVec16::kLanes) {
+    auto rgb = SIMDVec16::LoadGA16(rgba + 4 * x);
+    if (big_endian) {
+      rgb[0].SwapEndian();
+      rgb[1].SwapEndian();
+    }
+    StorePixels(rgb[0], luma + x);
+    StorePixels(rgb[1], alpha + x);
+  }
+#endif
+  for (; x < oxs; x++) {
+    uint16_t l = LoadLE16(rgba + 4 * x);
+    uint16_t a = LoadLE16(rgba + 4 * x + 2);
+    if (big_endian) {
+      l = SwapEndian(l);
+      a = SwapEndian(a);
+    }
+    luma[x] = l;
+    alpha[x] = a;
+  }
+}
+
+template <typename pixel_t>
+void StoreYCoCg(pixel_t r, pixel_t g, pixel_t b, pixel_t* y, pixel_t* co,
+                pixel_t* cg) {
+  *co = r - b;
+  pixel_t tmp = b + (*co >> 1);
+  *cg = g - tmp;
+  *y = tmp + (*cg >> 1);
+}
+
+#ifdef FJXL_GENERIC_SIMD
+void StoreYCoCg(SIMDVec16 r, SIMDVec16 g, SIMDVec16 b, int16_t* y, int16_t* co,
+                int16_t* cg) {
+  SIMDVec16 co_v = r.Sub(b);
+  SIMDVec16 tmp = b.Add(co_v.SignedShiftRight<1>());
+  SIMDVec16 cg_v = g.Sub(tmp);
+  SIMDVec16 y_v = tmp.Add(cg_v.SignedShiftRight<1>());
+  y_v.Store((uint16_t*)y);
+  co_v.Store((uint16_t*)co);
+  cg_v.Store((uint16_t*)cg);
+}
+
+void StoreYCoCg(SIMDVec16 r, SIMDVec16 g, SIMDVec16 b, int32_t* y, int32_t* co,
+                int32_t* cg) {
+  VecPair<SIMDVec32> r_up = r.Upcast();
+  VecPair<SIMDVec32> g_up = g.Upcast();
+  VecPair<SIMDVec32> b_up = b.Upcast();
+  SIMDVec32 co_lo_v = r_up.low.Sub(b_up.low);
+  SIMDVec32 tmp_lo = b_up.low.Add(co_lo_v.SignedShiftRight<1>());
+  SIMDVec32 cg_lo_v = g_up.low.Sub(tmp_lo);
+  SIMDVec32 y_lo_v = tmp_lo.Add(cg_lo_v.SignedShiftRight<1>());
+  SIMDVec32 co_hi_v = r_up.hi.Sub(b_up.hi);
+  SIMDVec32 tmp_hi = b_up.hi.Add(co_hi_v.SignedShiftRight<1>());
+  SIMDVec32 cg_hi_v = g_up.hi.Sub(tmp_hi);
+  SIMDVec32 y_hi_v = tmp_hi.Add(cg_hi_v.SignedShiftRight<1>());
+  y_lo_v.Store((uint32_t*)y);
+  co_lo_v.Store((uint32_t*)co);
+  cg_lo_v.Store((uint32_t*)cg);
+  y_hi_v.Store((uint32_t*)y + SIMDVec32::kLanes);
+  co_hi_v.Store((uint32_t*)co + SIMDVec32::kLanes);
+  cg_hi_v.Store((uint32_t*)cg + SIMDVec32::kLanes);
+}
+#endif
+
+template <typename pixel_t>
+void FillRowRGB8(const unsigned char* rgba, size_t oxs, pixel_t* y, pixel_t* co,
+                 pixel_t* cg) {
+  size_t x = 0;
+#ifdef FJXL_GENERIC_SIMD
+  for (; x + SIMDVec16::kLanes <= oxs; x += SIMDVec16::kLanes) {
+    auto rgb = SIMDVec16::LoadRGB8(rgba + 3 * x);
+    StoreYCoCg(rgb[0], rgb[1], rgb[2], y + x, co + x, cg + x);
+  }
+#endif
+  for (; x < oxs; x++) {
+    uint16_t r = rgba[3 * x];
+    uint16_t g = rgba[3 * x + 1];
+    uint16_t b = rgba[3 * x + 2];
+    StoreYCoCg<pixel_t>(r, g, b, y + x, co + x, cg + x);
+  }
+}
+
+template <bool big_endian, typename pixel_t>
+void FillRowRGB16(const unsigned char* rgba, size_t oxs, pixel_t* y,
+                  pixel_t* co, pixel_t* cg) {
+  size_t x = 0;
+#ifdef FJXL_GENERIC_SIMD
+  for (; x + SIMDVec16::kLanes <= oxs; x += SIMDVec16::kLanes) {
+    auto rgb = SIMDVec16::LoadRGB16(rgba + 6 * x);
+    if (big_endian) {
+      rgb[0].SwapEndian();
+      rgb[1].SwapEndian();
+      rgb[2].SwapEndian();
+    }
+    StoreYCoCg(rgb[0], rgb[1], rgb[2], y + x, co + x, cg + x);
+  }
+#endif
+  for (; x < oxs; x++) {
+    uint16_t r = LoadLE16(rgba + 6 * x);
+    uint16_t g = LoadLE16(rgba + 6 * x + 2);
+    uint16_t b = LoadLE16(rgba + 6 * x + 4);
+    if (big_endian) {
+      r = SwapEndian(r);
+      g = SwapEndian(g);
+      b = SwapEndian(b);
+    }
+    StoreYCoCg<pixel_t>(r, g, b, y + x, co + x, cg + x);
+  }
+}
+
+template <typename pixel_t>
+void FillRowRGBA8(const unsigned char* rgba, size_t oxs, pixel_t* y,
+                  pixel_t* co, pixel_t* cg, pixel_t* alpha) {
+  size_t x = 0;
+#ifdef FJXL_GENERIC_SIMD
+  for (; x + SIMDVec16::kLanes <= oxs; x += SIMDVec16::kLanes) {
+    auto rgb = SIMDVec16::LoadRGBA8(rgba + 4 * x);
+    StoreYCoCg(rgb[0], rgb[1], rgb[2], y + x, co + x, cg + x);
+    StorePixels(rgb[3], alpha + x);
+  }
+#endif
+  for (; x < oxs; x++) {
+    uint16_t r = rgba[4 * x];
+    uint16_t g = rgba[4 * x + 1];
+    uint16_t b = rgba[4 * x + 2];
+    uint16_t a = rgba[4 * x + 3];
+    StoreYCoCg<pixel_t>(r, g, b, y + x, co + x, cg + x);
+    alpha[x] = a;
+  }
+}
+
+template <bool big_endian, typename pixel_t>
+void FillRowRGBA16(const unsigned char* rgba, size_t oxs, pixel_t* y,
+                   pixel_t* co, pixel_t* cg, pixel_t* alpha) {
+  size_t x = 0;
+#ifdef FJXL_GENERIC_SIMD
+  for (; x + SIMDVec16::kLanes <= oxs; x += SIMDVec16::kLanes) {
+    auto rgb = SIMDVec16::LoadRGBA16(rgba + 8 * x);
+    if (big_endian) {
+      rgb[0].SwapEndian();
+      rgb[1].SwapEndian();
+      rgb[2].SwapEndian();
+      rgb[3].SwapEndian();
+    }
+    StoreYCoCg(rgb[0], rgb[1], rgb[2], y + x, co + x, cg + x);
+    StorePixels(rgb[3], alpha + x);
+  }
+#endif
+  for (; x < oxs; x++) {
+    uint16_t r = LoadLE16(rgba + 8 * x);
+    uint16_t g = LoadLE16(rgba + 8 * x + 2);
+    uint16_t b = LoadLE16(rgba + 8 * x + 4);
+    uint16_t a = LoadLE16(rgba + 8 * x + 6);
+    if (big_endian) {
+      r = SwapEndian(r);
+      g = SwapEndian(g);
+      b = SwapEndian(b);
+      a = SwapEndian(a);
+    }
+    StoreYCoCg<pixel_t>(r, g, b, y + x, co + x, cg + x);
+    alpha[x] = a;
+  }
+}
+
+template <typename Processor, typename BitDepth>
 void ProcessImageArea(const unsigned char* rgba, size_t x0, size_t y0,
                       size_t oxs, size_t xs, size_t yskip, size_t ys,
-                      size_t row_stride, BitDepth bitdepth,
-                      Processor* processors) {
+                      size_t row_stride, BitDepth bitdepth, size_t nb_chans,
+                      bool big_endian, Processor* processors) {
   constexpr size_t kPadding = 16;
 
   using pixel_t = typename BitDepth::pixel_t;
-  using upixel_t = typename BitDepth::upixel_t;
 
-  std::vector<std::array<std::array<pixel_t, 256 + kPadding * 2>, 2>>
-      group_data(nb_chans);
-  upixel_t allzero[4] = {};
-  upixel_t allone[4];
-  auto get_pixel = [&](size_t x, size_t y, size_t channel) {
-    pixel_t p = rgba[row_stride * (y0 + y) +
-                     (x0 + x) * nb_chans * BitDepth::kInputBytes +
-                     channel * BitDepth::kInputBytes];
-    if (BitDepth::kInputBytes == 2) {
-      if (big_endian) {
-        p <<= 8;
-        p |= rgba[row_stride * (y0 + y) + (x0 + x) * nb_chans * 2 +
-                  channel * 2 + 1];
-      } else {
-        p |= rgba[row_stride * (y0 + y) + (x0 + x) * nb_chans * 2 +
-                  channel * 2 + 1]
-             << 8;
-      }
+  constexpr size_t kAlign = 64;
+  constexpr size_t kAlignPixels = kAlign / sizeof(pixel_t);
+
+  auto align = [](pixel_t* ptr) {
+    size_t offset = reinterpret_cast<uintptr_t>(ptr) % kAlign;
+    if (offset) {
+      ptr += offset / sizeof(pixel_t);
     }
-    return p;
+    return ptr;
   };
 
-  size_t one_mask = (1 << bitdepth.bitdepth) - 1;
-  for (size_t c = 0; c < nb_chans; c++) {
-    allone[c] = one_mask;
-  }
+  constexpr size_t kNumPx =
+      (256 + kPadding * 2 + kAlignPixels + kAlignPixels - 1) / kAlignPixels *
+      kAlignPixels;
+
+  std::vector<std::array<std::array<pixel_t, kNumPx>, 2>> group_data(nb_chans);
+
   for (size_t y = 0; y < ys; y++) {
+    const auto rgba_row =
+        rgba + row_stride * (y0 + y) + x0 * nb_chans * BitDepth::kInputBytes;
+    pixel_t* crow[4];
+    pixel_t* prow[4];
+    for (size_t i = 0; i < 4; i++) {
+      crow[i] = align(&group_data[i][y & 1][kPadding]);
+      prow[i] = align(&group_data[i][(y - 1) & 1][kPadding]);
+    }
+
     // Pre-fill rows with YCoCg converted pixels.
-    for (size_t x = 0; x < oxs; x++) {
-      if (nb_chans < 3) {
-        pixel_t luma = get_pixel(x, y, 0);
-        group_data[0][y & 1][x + kPadding] = luma;
-        if (nb_chans == 2) {
-          pixel_t a = get_pixel(x, y, 1);
-          group_data[1][y & 1][x + kPadding] = a;
-        }
+    if (nb_chans == 1) {
+      if (BitDepth::kInputBytes == 1) {
+        FillRowG8(rgba_row, oxs, crow[0]);
+      } else if (big_endian) {
+        FillRowG16</*big_endian=*/true>(rgba_row, oxs, crow[0]);
       } else {
-        pixel_t r = get_pixel(x, y, 0);
-        pixel_t g = get_pixel(x, y, 1);
-        pixel_t b = get_pixel(x, y, 2);
-        if (nb_chans == 4) {
-          pixel_t a = get_pixel(x, y, 3);
-          group_data[3][y & 1][x + kPadding] = a;
-          group_data[1][y & 1][x + kPadding] = a ? r - b : 0;
-          pixel_t tmp = b + (group_data[1][y & 1][x + kPadding] >> 1);
-          group_data[2][y & 1][x + kPadding] = a ? g - tmp : 0;
-          group_data[0][y & 1][x + kPadding] =
-              a ? tmp + (group_data[2][y & 1][x + kPadding] >> 1) : 0;
-        } else {
-          group_data[1][y & 1][x + kPadding] = r - b;
-          pixel_t tmp = b + (group_data[1][y & 1][x + kPadding] >> 1);
-          group_data[2][y & 1][x + kPadding] = g - tmp;
-          group_data[0][y & 1][x + kPadding] =
-              tmp + (group_data[2][y & 1][x + kPadding] >> 1);
-        }
+        FillRowG16</*big_endian=*/false>(rgba_row, oxs, crow[0]);
       }
-      for (size_t c = 0; c < nb_chans; c++) {
-        allzero[c] |= group_data[c][y & 1][x + kPadding];
-        allone[c] &= group_data[c][y & 1][x + kPadding];
+    } else if (nb_chans == 2) {
+      if (BitDepth::kInputBytes == 1) {
+        FillRowGA8(rgba_row, oxs, crow[0], crow[1]);
+      } else if (big_endian) {
+        FillRowGA16</*big_endian=*/true>(rgba_row, oxs, crow[0], crow[1]);
+      } else {
+        FillRowGA16</*big_endian=*/false>(rgba_row, oxs, crow[0], crow[1]);
+      }
+    } else if (nb_chans == 3) {
+      if (BitDepth::kInputBytes == 1) {
+        FillRowRGB8(rgba_row, oxs, crow[0], crow[1], crow[2]);
+      } else if (big_endian) {
+        FillRowRGB16</*big_endian=*/true>(rgba_row, oxs, crow[0], crow[1],
+                                          crow[2]);
+      } else {
+        FillRowRGB16</*big_endian=*/false>(rgba_row, oxs, crow[0], crow[1],
+                                           crow[2]);
+      }
+    } else {
+      if (BitDepth::kInputBytes == 1) {
+        FillRowRGBA8(rgba_row, oxs, crow[0], crow[1], crow[2], crow[3]);
+      } else if (big_endian) {
+        FillRowRGBA16</*big_endian=*/true>(rgba_row, oxs, crow[0], crow[1],
+                                           crow[2], crow[3]);
+      } else {
+        FillRowRGBA16</*big_endian=*/false>(rgba_row, oxs, crow[0], crow[1],
+                                            crow[2], crow[3]);
       }
     }
     // Deal with x == 0.
     for (size_t c = 0; c < nb_chans; c++) {
-      group_data[c][y & 1][kPadding - 1] =
-          y > 0 ? group_data[c][(y - 1) & 1][kPadding] : 0;
+      *(crow[c] - 1) = y > 0 ? *(prow[c]) : 0;
       // Fix topleft.
-      group_data[c][(y - 1) & 1][kPadding - 1] =
-          y > 0 ? group_data[c][(y - 1) & 1][kPadding] : 0;
+      *(prow[c] - 1) = y > 0 ? *(prow[c]) : 0;
     }
     // Fill in padding.
     for (size_t c = 0; c < nb_chans; c++) {
       for (size_t x = oxs; x < xs; x++) {
-        group_data[c][y & 1][kPadding + x] =
-            group_data[c][y & 1][kPadding + oxs - 1];
+        crow[c][x] = crow[c][oxs - 1];
       }
     }
     if (y < yskip) continue;
     for (size_t c = 0; c < nb_chans; c++) {
-      if (y > 0 && (allzero[c] == 0 || allone[c] == one_mask)) {
-        processors[c].run += xs;
-        continue;
-      }
-
       // Get pointers to px/left/top/topleft data to speedup loop.
-      const pixel_t* row = &group_data[c][y & 1][kPadding];
-      const pixel_t* row_left = &group_data[c][y & 1][kPadding - 1];
-      const pixel_t* row_top =
-          y == 0 ? row_left : &group_data[c][(y - 1) & 1][kPadding];
-      const pixel_t* row_topleft =
-          y == 0 ? row_left : &group_data[c][(y - 1) & 1][kPadding - 1];
+      const pixel_t* row = crow[c];
+      const pixel_t* row_left = crow[c] - 1;
+      const pixel_t* row_top = y == 0 ? row_left : prow[c];
+      const pixel_t* row_topleft = y == 0 ? row_left : prow[c] - 1;
 
       processors[c].ProcessRow(row, row_left, row_top, row_topleft, xs);
     }
@@ -2302,25 +2931,11 @@ void ProcessImageArea(const unsigned char* rgba, size_t x0, size_t y0,
   }
 }
 
-template <typename Processor, size_t nb_chans, typename BitDepth>
-void ProcessImageArea(const unsigned char* rgba, size_t x0, size_t y0,
-                      size_t oxs, size_t xs, size_t yskip, size_t ys,
-                      size_t row_stride, BitDepth bitdepth, bool big_endian,
-                      Processor* processors) {
-  if (big_endian) {
-    ProcessImageArea<Processor, nb_chans, BitDepth, /*big_endian=*/
-                     true>(rgba, x0, y0, oxs, xs, yskip, ys, row_stride,
-                           bitdepth, processors);
-  } else {
-    ProcessImageArea<Processor, nb_chans, BitDepth, /*big_endian=*/false>(
-        rgba, x0, y0, oxs, xs, yskip, ys, row_stride, bitdepth, processors);
-  }
-}
-
-template <size_t nb_chans, typename BitDepth>
+template <typename BitDepth>
 void WriteACSection(const unsigned char* rgba, size_t x0, size_t y0, size_t oxs,
                     size_t ys, size_t row_stride, bool is_single_group,
-                    BitDepth bitdepth, bool big_endian, const PrefixCode& code,
+                    BitDepth bitdepth, size_t nb_chans, bool big_endian,
+                    const PrefixCode code[4],
                     std::array<BitWriter, 4>& output) {
   size_t xs = (oxs + kChunkSize - 1) / kChunkSize * kChunkSize;
   for (size_t i = 0; i < nb_chans; i++) {
@@ -2329,23 +2944,23 @@ void WriteACSection(const unsigned char* rgba, size_t x0, size_t y0, size_t oxs,
   }
   if (!is_single_group) {
     // Group header for modular image.
-    // When the image is single-group, the global modular image is the one that
-    // contains the pixel data, and there is no group header.
+    // When the image is single-group, the global modular image is the one
+    // that contains the pixel data, and there is no group header.
     output[0].Write(1, 1);     // Global tree
     output[0].Write(1, 1);     // All default wp
     output[0].Write(2, 0b00);  // 0 transforms
   }
 
-  ChunkEncoder<BitDepth> encoders[nb_chans];
-  ChannelRowProcessor<ChunkEncoder<BitDepth>, BitDepth> row_encoders[nb_chans];
+  ChunkEncoder<BitDepth> encoders[4];
+  ChannelRowProcessor<ChunkEncoder<BitDepth>, BitDepth> row_encoders[4];
   for (size_t c = 0; c < nb_chans; c++) {
     row_encoders[c].t = &encoders[c];
     encoders[c].output = &output[c];
-    encoders[c].code = &code;
+    encoders[c].code = &code[c];
   }
-  ProcessImageArea<ChannelRowProcessor<ChunkEncoder<BitDepth>, BitDepth>,
-                   nb_chans>(rgba, x0, y0, oxs, xs, 0, ys, row_stride, bitdepth,
-                             big_endian, row_encoders);
+  ProcessImageArea<ChannelRowProcessor<ChunkEncoder<BitDepth>, BitDepth>>(
+      rgba, x0, y0, oxs, xs, 0, ys, row_stride, bitdepth, nb_chans, big_endian,
+      row_encoders);
 }
 
 constexpr int kHashExp = 16;
@@ -2359,11 +2974,21 @@ inline uint32_t pixel_hash(uint32_t p) {
   return (p * kHashMultiplier) >> (32 - kHashExp);
 }
 
-template <typename Processor, size_t nb_chans>
+template <size_t nb_chans>
+void FillRowPalette(const unsigned char* inrow, size_t oxs,
+                    const int16_t* lookup, int16_t* out) {
+  for (size_t x = 0; x < oxs; x++) {
+    uint32_t p = 0;
+    memcpy(&p, inrow + x * nb_chans, nb_chans);
+    out[x] = lookup[pixel_hash(p)];
+  }
+}
+
+template <typename Processor>
 void ProcessImageAreaPalette(const unsigned char* rgba, size_t x0, size_t y0,
                              size_t oxs, size_t xs, size_t yskip, size_t ys,
                              size_t row_stride, const int16_t* lookup,
-                             Processor* processors) {
+                             size_t nb_chans, Processor* processors) {
   constexpr size_t kPadding = 16;
 
   std::vector<std::array<int16_t, 256 + kPadding * 2>> group_data(2);
@@ -2372,10 +2997,15 @@ void ProcessImageAreaPalette(const unsigned char* rgba, size_t x0, size_t y0,
   for (size_t y = 0; y < ys; y++) {
     // Pre-fill rows with palette converted pixels.
     const unsigned char* inrow = rgba + row_stride * (y0 + y) + x0 * nb_chans;
-    for (size_t x = 0; x < oxs; x++) {
-      uint32_t p = 0;
-      memcpy(&p, inrow + x * nb_chans, nb_chans);
-      group_data[y & 1][x + kPadding] = lookup[pixel_hash(p)];
+    int16_t* outrow = &group_data[y & 1][kPadding];
+    if (nb_chans == 1) {
+      FillRowPalette<1>(inrow, oxs, lookup, outrow);
+    } else if (nb_chans == 2) {
+      FillRowPalette<2>(inrow, oxs, lookup, outrow);
+    } else if (nb_chans == 3) {
+      FillRowPalette<3>(inrow, oxs, lookup, outrow);
+    } else if (nb_chans == 4) {
+      FillRowPalette<4>(inrow, oxs, lookup, outrow);
     }
     // Deal with x == 0.
     group_data[y & 1][kPadding - 1] =
@@ -2400,18 +3030,18 @@ void ProcessImageAreaPalette(const unsigned char* rgba, size_t x0, size_t y0,
   row_encoder.Finalize();
 }
 
-template <size_t nb_chans>
 void WriteACSectionPalette(const unsigned char* rgba, size_t x0, size_t y0,
                            size_t oxs, size_t ys, size_t row_stride,
-                           bool is_single_group, const PrefixCode& code,
-                           const int16_t* lookup, BitWriter& output) {
+                           bool is_single_group, const PrefixCode code[4],
+                           const int16_t* lookup, size_t nb_chans,
+                           BitWriter& output) {
   size_t xs = (oxs + kChunkSize - 1) / kChunkSize * kChunkSize;
 
   if (!is_single_group) {
     output.Allocate(16 * xs * ys + 4);
     // Group header for modular image.
-    // When the image is single-group, the global modular image is the one that
-    // contains the pixel data, and there is no group header.
+    // When the image is single-group, the global modular image is the one
+    // that contains the pixel data, and there is no group header.
     output.Write(1, 1);     // Global tree
     output.Write(1, 1);     // All default wp
     output.Write(2, 0b00);  // 0 transforms
@@ -2422,48 +3052,50 @@ void WriteACSectionPalette(const unsigned char* rgba, size_t x0, size_t y0,
 
   row_encoder.t = &encoder;
   encoder.output = &output;
-  encoder.code = &code;
+  encoder.code = &code[0];
   ProcessImageAreaPalette<
-      ChannelRowProcessor<ChunkEncoder<UpTo8Bits>, UpTo8Bits>, nb_chans>(
-      rgba, x0, y0, oxs, xs, 0, ys, row_stride, lookup, &row_encoder);
+      ChannelRowProcessor<ChunkEncoder<UpTo8Bits>, UpTo8Bits>>(
+      rgba, x0, y0, oxs, xs, 0, ys, row_stride, lookup, nb_chans, &row_encoder);
 }
 
-template <size_t nb_chans, typename BitDepth>
+template <typename BitDepth>
 void CollectSamples(const unsigned char* rgba, size_t x0, size_t y0, size_t xs,
-                    size_t row_stride, size_t row_count, uint64_t* raw_counts,
-                    uint64_t* lz77_counts, bool palette, BitDepth bitdepth,
-                    bool big_endian, const int16_t* lookup) {
+                    size_t row_stride, size_t row_count,
+                    uint64_t raw_counts[4][kNumRawSymbols],
+                    uint64_t lz77_counts[4][kNumLZ77], bool palette,
+                    BitDepth bitdepth, size_t nb_chans, bool big_endian,
+                    const int16_t* lookup) {
   if (palette) {
-    ChunkSampleCollector<UpTo8Bits> sample_collectors[nb_chans];
+    ChunkSampleCollector<UpTo8Bits> sample_collectors[4];
     ChannelRowProcessor<ChunkSampleCollector<UpTo8Bits>, UpTo8Bits>
-        row_sample_collectors[nb_chans];
+        row_sample_collectors[4];
     for (size_t c = 0; c < nb_chans; c++) {
       row_sample_collectors[c].t = &sample_collectors[c];
-      sample_collectors[c].raw_counts = raw_counts;
-      sample_collectors[c].lz77_counts = lz77_counts;
+      sample_collectors[c].raw_counts = raw_counts[c];
+      sample_collectors[c].lz77_counts = lz77_counts[c];
     }
     ProcessImageAreaPalette<
-        ChannelRowProcessor<ChunkSampleCollector<UpTo8Bits>, UpTo8Bits>,
-        nb_chans>(rgba, x0, y0, xs, xs, 1, 1 + row_count, row_stride, lookup,
-                  row_sample_collectors);
+        ChannelRowProcessor<ChunkSampleCollector<UpTo8Bits>, UpTo8Bits>>(
+        rgba, x0, y0, xs, xs, 1, 1 + row_count, row_stride, lookup, nb_chans,
+        row_sample_collectors);
   } else {
-    ChunkSampleCollector<BitDepth> sample_collectors[nb_chans];
+    ChunkSampleCollector<BitDepth> sample_collectors[4];
     ChannelRowProcessor<ChunkSampleCollector<BitDepth>, BitDepth>
-        row_sample_collectors[nb_chans];
+        row_sample_collectors[4];
     for (size_t c = 0; c < nb_chans; c++) {
       row_sample_collectors[c].t = &sample_collectors[c];
-      sample_collectors[c].raw_counts = raw_counts;
-      sample_collectors[c].lz77_counts = lz77_counts;
+      sample_collectors[c].raw_counts = raw_counts[c];
+      sample_collectors[c].lz77_counts = lz77_counts[c];
     }
     ProcessImageArea<
-        ChannelRowProcessor<ChunkSampleCollector<BitDepth>, BitDepth>,
-        nb_chans>(rgba, x0, y0, xs, xs, 1, 1 + row_count, row_stride, bitdepth,
-                  big_endian, row_sample_collectors);
+        ChannelRowProcessor<ChunkSampleCollector<BitDepth>, BitDepth>>(
+        rgba, x0, y0, xs, xs, 1, 1 + row_count, row_stride, bitdepth, nb_chans,
+        big_endian, row_sample_collectors);
   }
 }
 
 void PrepareDCGlobalPalette(bool is_single_group, size_t width, size_t height,
-                            const PrefixCode& code,
+                            const PrefixCode code[4],
                             const std::vector<uint32_t>& palette,
                             size_t pcolors_real, BitWriter* output) {
   PrepareDCGlobalCommon(is_single_group, width, height, code, output);
@@ -2490,7 +3122,7 @@ void PrepareDCGlobalPalette(bool is_single_group, size_t width, size_t height,
   ChannelRowProcessor<ChunkEncoder<UpTo8Bits>, UpTo8Bits> row_encoder;
   row_encoder.t = &encoder;
   encoder.output = output;
-  encoder.code = &code;
+  encoder.code = &code[0];
   int16_t p[4][32 + 1024] = {};
   uint8_t prgba[4];
   size_t i = 0;
@@ -2523,10 +3155,11 @@ void PrepareDCGlobalPalette(bool is_single_group, size_t width, size_t height,
   }
 }
 
-template <size_t nb_chans, typename BitDepth>
+template <typename BitDepth>
 JxlFastLosslessFrameState* LLEnc(const unsigned char* rgba, size_t width,
                                  size_t stride, size_t height,
-                                 BitDepth bitdepth, bool big_endian, int effort,
+                                 BitDepth bitdepth, size_t nb_chans,
+                                 bool big_endian, int effort,
                                  void* runner_opaque,
                                  FJxlParallelRunner runner) {
   assert(width != 0);
@@ -2636,8 +3269,8 @@ JxlFastLosslessFrameState* LLEnc(const unsigned char* rgba, size_t width,
   size_t num_dc_groups_x = (width + 2047) / 2048;
   size_t num_dc_groups_y = (height + 2047) / 2048;
 
-  uint64_t raw_counts[kNumRawSymbols] = {};
-  uint64_t lz77_counts[17] = {};
+  uint64_t raw_counts[4][kNumRawSymbols] = {};
+  uint64_t lz77_counts[4][kNumLZ77] = {};
 
   // sample the middle (effort * 2) rows of every group
   for (size_t g = 0; g < num_groups_y * num_groups_x; g++) {
@@ -2650,9 +3283,9 @@ JxlFastLosslessFrameState* LLEnc(const unsigned char* rgba, size_t width,
         std::min<int>(2 * effort * y_max / 256, y_offset + y_max - y_begin - 1);
     int x_max =
         std::min<size_t>(width - xg * 256, 256) / kChunkSize * kChunkSize;
-    CollectSamples<nb_chans>(rgba, xg * 256, y_begin, x_max, stride, y_count,
-                             raw_counts, lz77_counts, !collided, bitdepth,
-                             big_endian, lookup.data());
+    CollectSamples(rgba, xg * 256, y_begin, x_max, stride, y_count, raw_counts,
+                   lz77_counts, !collided, bitdepth, nb_chans, big_endian,
+                   lookup.data());
   }
 
   // TODO(veluca): can probably improve this and make it bitdepth-dependent.
@@ -2664,21 +3297,11 @@ JxlFastLosslessFrameState* LLEnc(const unsigned char* rgba, size_t width,
   for (size_t i = bitdepth.NumSymbols(doing_ycocg); i < kNumRawSymbols; i++) {
     base_raw_counts[i] = 0;
   }
-  // short runs will be sampled, but long ones won't.
-  // near full-group run is quite common (e.g. all-opaque alpha)
-  uint64_t base_lz77_counts_c32[PrefixCode::kNumLZ77] = {
-      12, 9, 11, 15, 2, 2, 1, 1, 1, 1, 2, 300, 0, 0, 0, 0, 0};
-  uint64_t base_lz77_counts_c16[PrefixCode::kNumLZ77] = {
-      18, 12, 9, 11, 15, 2, 2, 1, 1, 1, 1, 2, 300, 0, 0, 0, 0};
-  uint64_t base_lz77_counts_c8[PrefixCode::kNumLZ77] = {
-      32, 18, 12, 9, 11, 15, 2, 2, 1, 1, 1, 1, 2, 300, 0, 0, 0};
 
-  uint64_t* base_lz77_counts = kChunkSize == 8    ? base_lz77_counts_c8
-                               : kChunkSize == 16 ? base_lz77_counts_c16
-                                                  : base_lz77_counts_c32;
-
-  for (size_t i = 0; i < kNumRawSymbols; i++) {
-    raw_counts[i] = (raw_counts[i] << 8) + base_raw_counts[i];
+  for (size_t c = 0; c < 4; c++) {
+    for (size_t i = 0; i < kNumRawSymbols; i++) {
+      raw_counts[c][i] = (raw_counts[c][i] << 8) + base_raw_counts[i];
+    }
   }
 
   if (!collided) {
@@ -2686,16 +3309,35 @@ JxlFastLosslessFrameState* LLEnc(const unsigned char* rgba, size_t width,
     EncodeHybridUint000(PackSigned(pcolors - 1), &token, &nbits, &bits);
     // ensure all palette indices can actually be encoded
     for (size_t i = 0; i < token + 1; i++)
-      raw_counts[i] = std::max<uint64_t>(raw_counts[i], 1);
+      raw_counts[0][i] = std::max<uint64_t>(raw_counts[0][i], 1);
     // these tokens are only used for the palette itself so they can get a bad
     // code
-    for (size_t i = token + 1; i < 10; i++) raw_counts[i] = 1;
-  }
-  for (size_t i = 0; i < 17; i++) {
-    lz77_counts[i] = (lz77_counts[i] << 8) + base_lz77_counts[i];
+    for (size_t i = token + 1; i < 10; i++) raw_counts[0][i] = 1;
   }
 
-  alignas(64) PrefixCode hcode(bitdepth, raw_counts, lz77_counts);
+  // short runs will be sampled, but long ones won't.
+  // near full-group run is quite common (e.g. all-opaque alpha)
+  uint64_t base_lz77_counts_c32[kNumLZ77] = {12, 9, 11,  15, 2, 2, 1, 1, 1,
+                                             1,  2, 300, 0,  0, 0, 0, 0};
+  uint64_t base_lz77_counts_c16[kNumLZ77] = {18, 12, 9, 11,  15, 2, 2, 1, 1,
+                                             1,  1,  2, 300, 0,  0, 0, 0};
+  uint64_t base_lz77_counts_c8[kNumLZ77] = {32, 18, 12, 9, 11,  15, 2, 2, 1,
+                                            1,  1,  1,  2, 300, 0,  0, 0};
+
+  uint64_t* base_lz77_counts = kChunkSize == 8    ? base_lz77_counts_c8
+                               : kChunkSize == 16 ? base_lz77_counts_c16
+                                                  : base_lz77_counts_c32;
+
+  for (size_t c = 0; c < 4; c++) {
+    for (size_t i = 0; i < kNumLZ77; i++) {
+      lz77_counts[c][i] = (lz77_counts[c][i] << 8) + base_lz77_counts[i];
+    }
+  }
+
+  alignas(64) PrefixCode hcode[4];
+  for (size_t i = 0; i < 4; i++) {
+    hcode[i] = PrefixCode(bitdepth, raw_counts[i], lz77_counts[i]);
+  }
 
   bool onegroup = num_groups_x == 1 && num_groups_y == 1;
 
@@ -2731,12 +3373,12 @@ JxlFastLosslessFrameState* LLEnc(const unsigned char* rgba, size_t width,
     size_t y0 = yg * 256;
     auto& gd = frame_state->group_data[group_id];
     if (collided) {
-      WriteACSection<nb_chans>(rgba, x0, y0, xs, ys, stride, onegroup, bitdepth,
-                               big_endian, hcode, gd);
+      WriteACSection(rgba, x0, y0, xs, ys, stride, onegroup, bitdepth, nb_chans,
+                     big_endian, hcode, gd);
 
     } else {
-      WriteACSectionPalette<nb_chans>(rgba, x0, y0, xs, ys, stride, onegroup,
-                                      hcode, lookup.data(), gd[0]);
+      WriteACSectionPalette(rgba, x0, y0, xs, ys, stride, onegroup, hcode,
+                            lookup.data(), nb_chans, gd[0]);
     }
   };
 
@@ -2748,48 +3390,26 @@ JxlFastLosslessFrameState* LLEnc(const unsigned char* rgba, size_t width,
   return frame_state;
 }
 
-template <typename BitDepth>
-JxlFastLosslessFrameState* LLEnc(const unsigned char* rgba, size_t width,
-                                 size_t stride, size_t height, size_t nb_chans,
-                                 BitDepth bitdepth, bool big_endian, int effort,
-                                 void* runner_opaque,
-                                 FJxlParallelRunner runner) {
-  assert(nb_chans <= 4);
-  assert(nb_chans != 0);
-  if (nb_chans == 1) {
-    return LLEnc<1>(rgba, width, stride, height, bitdepth, big_endian, effort,
-                    runner_opaque, runner);
-  }
-  if (nb_chans == 2) {
-    return LLEnc<2>(rgba, width, stride, height, bitdepth, big_endian, effort,
-                    runner_opaque, runner);
-  }
-  if (nb_chans == 3) {
-    return LLEnc<3>(rgba, width, stride, height, bitdepth, big_endian, effort,
-                    runner_opaque, runner);
-  }
-  return LLEnc<4>(rgba, width, stride, height, bitdepth, big_endian, effort,
-                  runner_opaque, runner);
-}
-
 JxlFastLosslessFrameState* JxlFastLosslessEncodeImpl(
     const unsigned char* rgba, size_t width, size_t stride, size_t height,
     size_t nb_chans, size_t bitdepth, bool big_endian, int effort,
     void* runner_opaque, FJxlParallelRunner runner) {
   assert(bitdepth > 0);
+  assert(nb_chans <= 4);
+  assert(nb_chans != 0);
   if (bitdepth <= 8) {
-    return LLEnc(rgba, width, stride, height, nb_chans, UpTo8Bits(bitdepth),
+    return LLEnc(rgba, width, stride, height, UpTo8Bits(bitdepth), nb_chans,
                  big_endian, effort, runner_opaque, runner);
   }
   if (bitdepth <= 13) {
-    return LLEnc(rgba, width, stride, height, nb_chans, From9To13Bits(bitdepth),
+    return LLEnc(rgba, width, stride, height, From9To13Bits(bitdepth), nb_chans,
                  big_endian, effort, runner_opaque, runner);
   }
   if (bitdepth == 14) {
-    return LLEnc(rgba, width, stride, height, nb_chans, Exactly14Bits(bitdepth),
+    return LLEnc(rgba, width, stride, height, Exactly14Bits(bitdepth), nb_chans,
                  big_endian, effort, runner_opaque, runner);
   }
-  return LLEnc(rgba, width, stride, height, nb_chans, MoreThan14Bits(bitdepth),
+  return LLEnc(rgba, width, stride, height, MoreThan14Bits(bitdepth), nb_chans,
                big_endian, effort, runner_opaque, runner);
 }
 
@@ -2810,20 +3430,29 @@ JxlFastLosslessFrameState* JxlFastLosslessEncodeImpl(
 
 #if defined(__aarch64__) || defined(_M_ARM64)
 
+namespace default_implementation {
 #define FJXL_NEON
 #include "lib/jxl/enc_fast_lossless.cc"
 #undef FJXL_NEON
+}  // namespace default_implementation
 
 #elif defined(__x86_64__) || defined(_M_X64)
 
+namespace default_implementation {
 #include "lib/jxl/enc_fast_lossless.cc"
+}
 
 #ifdef __clang__
-#pragma clang attribute push(__attribute__((target("avx2"))), \
+#pragma clang attribute push(__attribute__((target("avx,avx2"))), \
                              apply_to = function)
+// Causes spurious warnings on clang5.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmissing-braces"
 #elif defined(__GNUC__)
 #pragma GCC push_options
-#pragma GCC target "avx2"
+// Seems to cause spurious errors on GCC8.
+#pragma GCC diagnostic ignored "-Wpsabi"
+#pragma GCC target "avx,avx2"
 #endif
 
 namespace AVX2 {
@@ -2834,18 +3463,19 @@ namespace AVX2 {
 
 #ifdef __clang__
 #pragma clang attribute pop
+#pragma clang diagnostic pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
 
 #if FJXL_ENABLE_AVX512
 #ifdef __clang__
-#pragma clang attribute push(                                      \
-    __attribute__((target("avx512cd,avx512bw,avx512vl,avx512f"))), \
+#pragma clang attribute push(                                                 \
+    __attribute__((target("avx512cd,avx512bw,avx512vl,avx512f,avx512vbmi"))), \
     apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
-#pragma GCC target "avx512cd,avx512bw,avx512vl,avx512f"
+#pragma GCC target "avx512cd,avx512bw,avx512vl,avx512f,avx512vbmi"
 #endif
 
 namespace AVX512 {
@@ -2862,7 +3492,9 @@ namespace AVX512 {
 #endif  // FJXL_ENABLE_AVX512
 
 #else
+namespace default_implementation {
 #include "lib/jxl/enc_fast_lossless.cc"
+}
 #endif
 
 extern "C" {
@@ -2907,6 +3539,7 @@ JxlFastLosslessFrameState* JxlFastLosslessPrepareFrame(
 #if (!defined(_MSC_VER) || defined(__clang__)) && defined(__x86_64__)
 #if FJXL_ENABLE_AVX512
   if (__builtin_cpu_supports("avx512cd") &&
+      __builtin_cpu_supports("avx512vbmi") &&
       __builtin_cpu_supports("avx512bw") && __builtin_cpu_supports("avx512f") &&
       __builtin_cpu_supports("avx512vl")) {
     return AVX512::JxlFastLosslessEncodeImpl(rgba, width, row_stride, height,
@@ -2920,9 +3553,9 @@ JxlFastLosslessFrameState* JxlFastLosslessPrepareFrame(
                                            effort, runner_opaque, runner);
   }
 #endif
-  return JxlFastLosslessEncodeImpl(rgba, width, row_stride, height, nb_chans,
-                                   bitdepth, big_endian, effort, runner_opaque,
-                                   runner);
+  return default_implementation::JxlFastLosslessEncodeImpl(
+      rgba, width, row_stride, height, nb_chans, bitdepth, big_endian, effort,
+      runner_opaque, runner);
 }
 
 }  // extern "C"
