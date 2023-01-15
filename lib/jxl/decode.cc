@@ -9,11 +9,15 @@
 #include "lib/jxl/base/byte_order.h"
 #include "lib/jxl/base/span.h"
 #include "lib/jxl/base/status.h"
+#if JPEGXL_ENABLE_BOXES || JPEGXL_ENABLE_TRANSCODE_JPEG
 #include "lib/jxl/box_content_decoder.h"
+#endif
 #include "lib/jxl/dec_external_image.h"
 #include "lib/jxl/dec_frame.h"
 #include "lib/jxl/dec_modular.h"
+#if JPEGXL_ENABLE_TRANSCODE_JPEG
 #include "lib/jxl/decode_to_jpeg.h"
+#endif
 #include "lib/jxl/fields.h"
 #include "lib/jxl/frame_header.h"
 #include "lib/jxl/headers.h"
@@ -511,8 +515,11 @@ struct JxlDecoderStruct {
 
   BoxStage box_stage;
 
-  jxl::JxlToJpegDecoder jpeg_decoder;
+#if JPEGXL_ENABLE_BOXES
   jxl::JxlBoxContentDecoder box_content_decoder;
+#endif
+#if JPEGXL_ENABLE_TRANSCODE_JPEG
+  jxl::JxlToJpegDecoder jpeg_decoder;
   // Decodes Exif or XMP metadata for JPEG reconstruction
   jxl::JxlBoxContentDecoder metadata_decoder;
   std::vector<uint8_t> exif_metadata;
@@ -533,6 +540,7 @@ struct JxlDecoderStruct {
     if (store_xmp < 2 && recon_xmp_size > 0) return true;
     return false;
   }
+#endif
 
   // Statistics which CodecInOut can keep
   uint64_t dec_pixels;
@@ -699,6 +707,8 @@ void JxlDecoderRewindDecodingState(JxlDecoder* dec) {
   dec->box_out_buffer_size = 0;
   dec->box_out_buffer_begin = 0;
   dec->box_out_buffer_pos = 0;
+
+#if JPEGXL_ENABLE_TRANSCODE_JPEG
   dec->exif_metadata.clear();
   dec->xmp_metadata.clear();
   dec->store_exif = 0;
@@ -707,6 +717,7 @@ void JxlDecoderRewindDecodingState(JxlDecoder* dec) {
   dec->recon_exif_size = 0;
   dec->recon_xmp_size = 0;
   dec->recon_output_jpeg = JpegReconStage::kNone;
+#endif
 
   dec->events_wanted = 0;
   dec->basic_info_size_hint = InitialBasicInfoSizeHint();
@@ -1214,6 +1225,7 @@ JxlDecoderStatus JxlDecoderProcessCodestream(JxlDecoder* dec) {
       break;
     }
     if (dec->frame_stage == FrameStage::kHeader) {
+#if JPEGXL_ENABLE_TRANSCODE_JPEG
       if (dec->recon_output_jpeg == JpegReconStage::kSettingMetadata ||
           dec->recon_output_jpeg == JpegReconStage::kOutputting) {
         // The image bundle contains the JPEG reconstruction frame, but the
@@ -1223,14 +1235,16 @@ JxlDecoderStatus JxlDecoderProcessCodestream(JxlDecoder* dec) {
         return JXL_API_ERROR(
             "cannot decode a next frame after JPEG reconstruction frame");
       }
+#endif
       if (!dec->ib) {
         dec->ib.reset(new jxl::ImageBundle(&dec->image_metadata));
       }
+#if JPEGXL_ENABLE_TRANSCODE_JPEG
       // If JPEG reconstruction is wanted and possible, set the jpeg_data of
       // the ImageBundle.
       if (!dec->jpeg_decoder.SetImageBundleJpegData(dec->ib.get()))
         return JXL_DEC_ERROR;
-
+#endif
       dec->frame_dec.reset(new FrameDecoder(
           dec->passes_state.get(), dec->metadata, dec->thread_pool.get(),
           /*use_slow_rendering_pipeline=*/false));
@@ -1386,8 +1400,11 @@ JxlDecoderStatus JxlDecoderProcessCodestream(JxlDecoder* dec) {
         if (dec->preview_frame) {
           return JXL_DEC_NEED_PREVIEW_OUT_BUFFER;
         }
-        if ((!dec->jpeg_decoder.IsOutputSet() ||
+        if (
+#if JPEGXL_ENABLE_TRANSCODE_JPEG
+            (!dec->jpeg_decoder.IsOutputSet() ||
              dec->ib->jpeg_data == nullptr) &&
+#endif
             dec->is_last_of_still && !dec->skipping_frame) {
           // TODO(lode): remove the dec->is_last_of_still condition if the
           // frame decoder needs the image buffer as working space for decoding
@@ -1462,7 +1479,7 @@ JxlDecoderStatus JxlDecoderProcessCodestream(JxlDecoder* dec) {
       if (!dec->frame_dec->FinalizeFrame()) {
         return JXL_API_ERROR("decoding frame failed");
       }
-
+#if JPEGXL_ENABLE_TRANSCODE_JPEG
       // If jpeg output was requested, we merely return the JXL_DEC_FULL_IMAGE
       // status without outputting pixels.
       if (dec->jpeg_decoder.IsOutputSet() && dec->ib->jpeg_data != nullptr) {
@@ -1470,7 +1487,7 @@ JxlDecoderStatus JxlDecoderProcessCodestream(JxlDecoder* dec) {
         dec->recon_output_jpeg = JpegReconStage::kSettingMetadata;
         return JXL_DEC_FULL_IMAGE;
       }
-
+#endif
       if (dec->preview_frame || dec->is_last_of_still) {
         dec->image_out_buffer_set = false;
         dec->extra_channel_output.clear();
@@ -1527,6 +1544,7 @@ void JxlDecoderCloseInput(JxlDecoder* dec) { dec->input_closed = true; }
 
 JxlDecoderStatus JxlDecoderSetJPEGBuffer(JxlDecoder* dec, uint8_t* data,
                                          size_t size) {
+#if JPEGXL_ENABLE_TRANSCODE_JPEG
   // JPEG reconstruction buffer can only set and updated before or during the
   // first frame, the reconstruction box refers to the first frame and in
   // theory multi-frame images should not be used with a jbrd box.
@@ -1537,10 +1555,17 @@ JxlDecoderStatus JxlDecoderSetJPEGBuffer(JxlDecoder* dec, uint8_t* data,
     return JXL_API_ERROR("Already set JPEG buffer");
   }
   return dec->jpeg_decoder.SetOutputBuffer(data, size);
+#else
+  return JXL_API_ERROR("JPEG reconstruction is not supported.");
+#endif
 }
 
 size_t JxlDecoderReleaseJPEGBuffer(JxlDecoder* dec) {
+#if JPEGXL_ENABLE_TRANSCODE_JPEG
   return dec->jpeg_decoder.ReleaseOutputBuffer();
+#else
+  return JXL_API_ERROR("JPEG reconstruction is not supported.");
+#endif
 }
 
 // Parses the header of the box, outputting the 4-character type and the box
@@ -1596,6 +1621,7 @@ static JxlDecoderStatus HandleBoxes(JxlDecoder* dec) {
     if (dec->box_stage != BoxStage::kHeader) {
       dec->AdvanceInput(dec->header_size);
       dec->header_size = 0;
+#if JPEGXL_ENABLE_BOXES
       if ((dec->events_wanted & JXL_DEC_BOX) &&
           dec->box_out_buffer_set_current_box) {
         uint8_t* next_out = dec->box_out_buffer + dec->box_out_buffer_pos;
@@ -1616,7 +1642,8 @@ static JxlDecoderStatus HandleBoxes(JxlDecoder* dec) {
           return box_result;
         }
       }
-
+#endif
+#if JPEGXL_ENABLE_TRANSCODE_JPEG
       if (dec->store_exif == 1 || dec->store_xmp == 1) {
         std::vector<uint8_t>& metadata =
             (dec->store_exif == 1) ? dec->exif_metadata : dec->xmp_metadata;
@@ -1654,8 +1681,9 @@ static JxlDecoderStatus HandleBoxes(JxlDecoder* dec) {
           }
         }
       }
+#endif
     }
-
+#if JPEGXL_ENABLE_TRANSCODE_JPEG
     if (dec->recon_output_jpeg == JpegReconStage::kSettingMetadata &&
         !dec->JbrdNeedMoreBoxes()) {
       jxl::jpeg::JPEGData* jpeg_data = dec->ib->jpeg_data.get();
@@ -1686,6 +1714,7 @@ static JxlDecoderStatus HandleBoxes(JxlDecoder* dec) {
         return JXL_DEC_FULL_IMAGE;
       }
     }
+#endif
 
     if (dec->box_stage == BoxStage::kHeader) {
       if (!dec->have_container) {
@@ -1700,9 +1729,11 @@ static JxlDecoderStatus HandleBoxes(JxlDecoder* dec) {
           // Not yet seen (all) codestream boxes.
           return JXL_DEC_NEED_MORE_INPUT;
         }
+#if JPEGXL_ENABLE_TRANSCODE_JPEG
         if (dec->JbrdNeedMoreBoxes()) {
           return JXL_DEC_NEED_MORE_INPUT;
         }
+#endif
         if (dec->input_closed) {
           return JXL_DEC_SUCCESS;
         }
@@ -1723,7 +1754,10 @@ static JxlDecoderStatus HandleBoxes(JxlDecoder* dec) {
       bool boxed_codestream_done =
           ((dec->events_wanted & JXL_DEC_BOX) &&
            dec->stage == DecoderStage::kCodestreamFinished &&
-           dec->last_codestream_seen && !dec->JbrdNeedMoreBoxes());
+#if JPEGXL_ENABLE_TRANSCODE_JPEG
+           !dec->JbrdNeedMoreBoxes() &&
+#endif
+           dec->last_codestream_seen);
       if (boxed_codestream_done && dec->avail_in >= 2 &&
           dec->next_in[0] == 0xff &&
           dec->next_in[1] == jxl::kCodestreamMarker) {
@@ -1778,7 +1812,7 @@ static JxlDecoderStatus HandleBoxes(JxlDecoder* dec) {
           dec->box_contents_unbounded ? 0 : (box_size - header_size);
       dec->box_size = box_size;
       dec->header_size = header_size;
-
+#if JPEGXL_ENABLE_TRANSCODE_JPEG
       if (dec->orig_events_wanted & JXL_DEC_JPEG_RECONSTRUCTION) {
         // Initiate storing of Exif or XMP data for JPEG reconstruction
         if (dec->store_exif == 0 &&
@@ -1792,19 +1826,22 @@ static JxlDecoderStatus HandleBoxes(JxlDecoder* dec) {
           dec->recon_out_buffer_pos = 0;
         }
       }
-
+#endif
+#if JPEGXL_ENABLE_BOXES
       if (dec->events_wanted & JXL_DEC_BOX) {
         bool decompress =
             dec->decompress_boxes && memcmp(dec->box_type, "brob", 4) == 0;
         dec->box_content_decoder.StartBox(
             decompress, dec->box_contents_unbounded, dec->box_contents_size);
       }
+#endif
+#if JPEGXL_ENABLE_TRANSCODE_JPEG
       if (dec->store_exif == 1 || dec->store_xmp == 1) {
         bool brob = memcmp(dec->box_type, "brob", 4) == 0;
         dec->metadata_decoder.StartBox(brob, dec->box_contents_unbounded,
                                        dec->box_contents_size);
       }
-
+#endif
       if (memcmp(dec->box_type, "ftyp", 4) == 0) {
         dec->box_stage = BoxStage::kFtyp;
       } else if (memcmp(dec->box_type, "jxlc", 4) == 0) {
@@ -1815,6 +1852,7 @@ static JxlDecoderStatus HandleBoxes(JxlDecoder* dec) {
         dec->box_stage = BoxStage::kCodestream;
       } else if (memcmp(dec->box_type, "jxlp", 4) == 0) {
         dec->box_stage = BoxStage::kPartialCodestream;
+#if JPEGXL_ENABLE_TRANSCODE_JPEG
       } else if ((dec->orig_events_wanted & JXL_DEC_JPEG_RECONSTRUCTION) &&
                  memcmp(dec->box_type, "jbrd", 4) == 0) {
         if (!(dec->events_wanted & JXL_DEC_JPEG_RECONSTRUCTION)) {
@@ -1822,6 +1860,7 @@ static JxlDecoderStatus HandleBoxes(JxlDecoder* dec) {
               "multiple JPEG reconstruction boxes not supported");
         }
         dec->box_stage = BoxStage::kJpegRecon;
+#endif
       } else {
         dec->box_stage = BoxStage::kSkip;
       }
@@ -1860,11 +1899,13 @@ static JxlDecoderStatus HandleBoxes(JxlDecoder* dec) {
       dec->box_stage = BoxStage::kCodestream;
     } else if (dec->box_stage == BoxStage::kCodestream) {
       JxlDecoderStatus status = jxl::JxlDecoderProcessCodestream(dec);
+#if JPEGXL_ENABLE_TRANSCODE_JPEG
       if (status == JXL_DEC_FULL_IMAGE) {
         if (dec->recon_output_jpeg != JpegReconStage::kNone) {
           continue;
         }
       }
+#endif
       if (status == JXL_DEC_NEED_MORE_INPUT) {
         if (dec->file_pos == dec->box_contents_end &&
             !dec->box_contents_unbounded) {
@@ -1874,10 +1915,12 @@ static JxlDecoderStatus HandleBoxes(JxlDecoder* dec) {
       }
 
       if (status == JXL_DEC_SUCCESS) {
+#if JPEGXL_ENABLE_TRANSCODE_JPEG
         if (dec->JbrdNeedMoreBoxes()) {
           dec->box_stage = BoxStage::kSkip;
           continue;
         }
+#endif
         if (dec->box_contents_unbounded) {
           // Last box reached and codestream done, nothing more to do.
           break;
@@ -1889,6 +1932,7 @@ static JxlDecoderStatus HandleBoxes(JxlDecoder* dec) {
         }
       }
       return status;
+#if JPEGXL_ENABLE_TRANSCODE_JPEG
     } else if (dec->box_stage == BoxStage::kJpegRecon) {
       if (!dec->jpeg_decoder.IsParsingBox()) {
         // This is a new JPEG reconstruction metadata box.
@@ -1937,6 +1981,7 @@ static JxlDecoderStatus HandleBoxes(JxlDecoder* dec) {
         // If anything else, return the result.
         return recon_result;
       }
+#endif
     } else if (dec->box_stage == BoxStage::kSkip) {
       if (dec->box_contents_unbounded) {
         if (dec->input_closed) {
@@ -1972,7 +2017,6 @@ static JxlDecoderStatus HandleBoxes(JxlDecoder* dec) {
       JXL_DASSERT(false);  // unknown box stage
     }
   }
-
   return JXL_DEC_SUCCESS;
 }
 
@@ -2017,9 +2061,11 @@ JxlDecoderStatus JxlDecoderProcessInput(JxlDecoder* dec) {
     if (dec->CanUseMoreCodestreamInput()) {
       return JXL_API_ERROR("codestream never finished");
     }
+#if JPEGXL_ENABLE_TRANSCODE_JPEG
     if (dec->JbrdNeedMoreBoxes()) {
       return JXL_API_ERROR("missing metadata boxes for jpeg reconstruction");
     }
+#endif
   }
 
   return status;

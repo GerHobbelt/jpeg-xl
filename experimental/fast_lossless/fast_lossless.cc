@@ -21,6 +21,8 @@
 #error "system not known to be little endian"
 #endif
 
+namespace {
+
 #ifndef _MSC_VER
 
 inline uint32_t Log2(uint32_t value) { return 31 - __builtin_clz(value); }
@@ -171,10 +173,10 @@ struct PrefixCode {
   static void ComputeCodeLengths(uint64_t* freqs, size_t n, size_t limit,
                                  uint8_t* nbits) {
     if (n <= 1) return;
-    assert(n <= (1 << limit));
+    assert(n <= (1u << limit));
     assert(n <= 32);
-    int parent[64] = {};
-    int height[64] = {};
+    unsigned int parent[64] = {};
+    unsigned int height[64] = {};
     using QElem = std::pair<uint64_t, size_t>;
     std::priority_queue<QElem, std::vector<QElem>, std::greater<QElem>> q;
     // Standard Huffman code construction. On failure (i.e. if going beyond the
@@ -1116,8 +1118,8 @@ void PrepareDCGlobalPalette(bool is_single_group, size_t width, size_t height,
   encoder.code = &code;
   int16_t p[4][32 + 1024] = {};
   uint8_t prgba[4];
-  int i = 0;
-  int have_zero = 0;
+  size_t i = 0;
+  size_t have_zero = 0;
   if (palette[pcolors_real - 1] == 0) have_zero = 1;
   for (; i < pcolors; i++) {
     if (i < pcolors_real) {
@@ -1212,7 +1214,7 @@ size_t LLEnc(const unsigned char* rgba, size_t width, size_t stride,
     if (palette[0] == 1) palette[0] = 0;
     bool have_color = false;
     uint8_t minG = 255, maxG = 0;
-    for (int k = 0; k < kHashSize; k++) {
+    for (uint32_t k = 0; k < kHashSize; k++) {
       if (palette[k] == 0) continue;
       uint8_t p[4];
       memcpy(p, &palette[k], 4);
@@ -1325,7 +1327,9 @@ size_t LLEnc(const unsigned char* rgba, size_t width, size_t stride,
     PrepareDCGlobalPalette(onegroup, width, height, hcode, palette, pcolors,
                            &group_data[0][0]);
   }
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
   for (size_t g = 0; g < num_groups_y * num_groups_x; g++) {
     size_t xg = g % num_groups_x;
     size_t yg = g / num_groups_x;
@@ -1352,9 +1356,16 @@ size_t LLEnc(const unsigned char* rgba, size_t width, size_t stride,
   return writer.bytes_written;
 }
 
-size_t FastLosslessEncode(const unsigned char* rgba, size_t width,
-                          size_t stride, size_t height, size_t nb_chans,
-                          size_t bitdepth, int effort, unsigned char** output) {
+}  // namespace
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+size_t JxlFastLosslessEncode(const unsigned char* rgba, size_t width,
+                             size_t stride, size_t height, size_t nb_chans,
+                             size_t bitdepth, int effort,
+                             unsigned char** output) {
   assert(bitdepth <= 12);
   assert(bitdepth > 0);
   assert(nb_chans <= 4);
@@ -1388,3 +1399,7 @@ size_t FastLosslessEncode(const unsigned char* rgba, size_t width,
   }
   return 0;
 }
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif
