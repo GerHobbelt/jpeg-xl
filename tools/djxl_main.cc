@@ -238,6 +238,7 @@ static bool DecompressJxlReconstructJPEG(const jpegxl::tools::DecompressArgs& ar
   const double t0 = jxl::Now();
   jxl::extras::PackedPixelFile ppf;  // for JxlBasicInfo
   jxl::extras::JXLDecompressParams dparams;
+  dparams.allow_partial_input = args.allow_partial_files;
   dparams.runner = JxlThreadParallelRunner;
   dparams.runner_opaque = runner;
   if (!jxl::extras::DecodeImageJXL(compressed.data(), compressed.size(),
