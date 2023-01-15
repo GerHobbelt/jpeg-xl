@@ -12,10 +12,10 @@
 
 
 #if defined(BUILD_MONOLITHIC)
-#define main(cnt, arr) jpegXL_C_test_main(cnt, arr)
+#define main jpegXL_C_test_main
 #endif
 
-int main(int argc, const char** argv) {
+int main(void) {
   if (!JxlDecoderVersion()) return 1;
   JxlDecoder* dec = JxlDecoderCreate(NULL);
   if (!dec) return 1;
