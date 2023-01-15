@@ -21,7 +21,7 @@ namespace tools {
 
 static int HBDJPEGMain(int argc, const char* argv[]) {
   if (argc < 3) {
-    fprintf(stderr, "Usage: %s input output.jpg\n", argv[0]);
+    fprintf(stderr, "Usage: %s input output.jpg [distance]\n", argv[0]);
     return 1;
   }
   fprintf(stderr, "Compressing %s to %s\n", argv[1], argv[2]);
@@ -32,7 +32,10 @@ static int HBDJPEGMain(int argc, const char* argv[]) {
   }
   jxl::extras::JpegSettings settings;
   settings.xyb = false;
-  settings.distance = 0.0f;
+  settings.distance = 1.0f;
+  if (argc >= 4) {
+    settings.distance = atof(argv[3]);
+  }
   std::vector<uint8_t> output;
   JXL_CHECK(jxl::extras::EncodeJpeg(io.Main(), settings, nullptr, &output));
   if (!jxl::WriteFile(output, argv[2])) {
