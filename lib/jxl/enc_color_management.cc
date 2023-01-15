@@ -906,14 +906,27 @@ Status ColorEncoding::SetFieldsFromICC() {
   JXL_RETURN_IF_ERROR(skcms_Parse(icc_.data(), icc_.size(), &profile));
 
   // skcms does not return the rendering intent, so get it from the file. It
-  // is encoded as big-endian 32-bit integer in bytes 60..63.
-  uint32_t rendering_intent32 = icc_[67];
-  if (rendering_intent32 > 3 || icc_[64] != 0 || icc_[65] != 0 ||
-      icc_[66] != 0) {
-    return JXL_FAILURE("Invalid rendering intent %u\n", rendering_intent32);
+  // should be encoded as big-endian 32-bit integer in bytes 60..63.
+  uint32_t big_endian_rendering_intent =
+      icc_[67] + (icc_[66] << 8) + (icc_[65] << 16) + (icc_[64] << 24);
+  // Some files encode rendering intent as little endian, which is not spec
+  // compliant. However we accept those with a warning.
+  uint32_t litte_endian_rendering_intent =
+      (icc_[67] << 24) + (icc_[66] << 16) + (icc_[65] << 8) + icc_[64];
+  uint32_t candidate_rendering_intent =
+      std::min(big_endian_rendering_intent, litte_endian_rendering_intent);
+  if (candidate_rendering_intent == litte_endian_rendering_intent) {
+    JXL_WARNING(
+        "Invalid rendering intent bytes: [0x%02X 0x%02X 0x%02X 0x%02X], "
+        "assuming %u was meant",
+        icc_[64], icc_[65], icc_[66], icc_[67], candidate_rendering_intent);
+  }
+  if (candidate_rendering_intent > 3) {
+    return JXL_FAILURE("Invalid rendering intent %u\n",
+                       candidate_rendering_intent);
   }
   // ICC and RenderingIntent have the same values (0..3).
-  rendering_intent = static_cast<RenderingIntent>(rendering_intent32);
+  rendering_intent = static_cast<RenderingIntent>(candidate_rendering_intent);
 
   if (profile.has_CICP && ApplyCICP(profile.CICP.color_primaries,
                                     profile.CICP.transfer_characteristics,
