@@ -19,6 +19,12 @@
 #include <memory>
 #include <vector>
 
+#if defined(__aarch64__) || defined(_M_ARM64)
+#include <arm_neon.h>
+#elif defined(__x86_64__) || defined(_M_X64)
+#include <immintrin.h>
+#endif
+
 namespace {
 #if defined(_MSC_VER) && !defined(__clang__)
 #define FJXL_INLINE __forceinline
@@ -99,6 +105,33 @@ struct BitWriter {
   void ZeroPadToByte() {
     if (bits_in_buffer != 0) {
       Write(8 - bits_in_buffer, 0);
+    }
+  }
+
+  FJXL_INLINE void WriteMultiple(const uint64_t* nbits, const uint64_t* bits,
+                                 size_t n) {
+    // Necessary because Write() is only guaranteed to work with <=56 bits.
+    // Trying to SIMD-fy this code results in lower speed (and definitely less
+    // clarity).
+    {
+      for (size_t i = 0; i < n; i++) {
+        this->buffer |= bits[i] << this->bits_in_buffer;
+        memcpy(this->data.get() + this->bytes_written, &this->buffer, 8);
+        uint64_t shift = 64 - this->bits_in_buffer;
+        this->bits_in_buffer += nbits[i];
+        // This `if` seems to be faster than using ternaries.
+        if (this->bits_in_buffer >= 64) {
+          uint64_t next_buffer = bits[i] >> shift;
+          this->buffer = next_buffer;
+          this->bits_in_buffer -= 64;
+          this->bytes_written += 8;
+        }
+      }
+      memcpy(this->data.get() + this->bytes_written, &this->buffer, 8);
+      size_t bytes_in_buffer = this->bits_in_buffer / 8;
+      this->bits_in_buffer -= bytes_in_buffer * 8;
+      this->buffer >>= bytes_in_buffer * 8;
+      this->bytes_written += bytes_in_buffer;
     }
   }
 
@@ -423,7 +456,6 @@ namespace {
 constexpr size_t kNumRawSymbols = 19;
 
 constexpr size_t kLZ77Offset = 224;
-constexpr size_t kLZ77MinLength = 16;
 
 struct PrefixCode {
   static constexpr size_t kNumLZ77 = 17;
@@ -431,8 +463,8 @@ struct PrefixCode {
   uint8_t raw_nbits[kNumRawSymbols] = {};
   uint8_t raw_bits[kNumRawSymbols] = {};
 
-  alignas(32) uint8_t raw_nbits_simd[16] = {};
-  alignas(32) uint8_t raw_bits_simd[16] = {};
+  alignas(64) uint8_t raw_nbits_simd[16] = {};
+  alignas(64) uint8_t raw_bits_simd[16] = {};
 
   uint8_t lz77_nbits[kNumLZ77] = {};
   uint16_t lz77_bits[kNumLZ77] = {};
@@ -605,7 +637,7 @@ struct PrefixCode {
                              raw_bits_simd);
   }
 
-  void WriteTo(BitWriter* writer) const {
+  void WriteTo(BitWriter* writer, size_t chunk_size) const {
     uint64_t code_length_counts[18] = {};
     code_length_counts[17] = 3 + 2 * (kNumLZ77 - 1);
     for (size_t i = 0; i < kNumRawSymbols; i++) {
@@ -669,321 +701,813 @@ struct PrefixCode {
       writer->Write(code_length_nbits[lz77_nbits[i]],
                     code_length_bits[lz77_nbits[i]]);
       if (i != num_lz77 - 1) {
-        // Encode gap between LZ77 symbols: 15 zeros.
-        writer->Write(code_length_nbits[17], code_length_bits[17]);
-        writer->Write(3, 0b000);  // 3
-        writer->Write(code_length_nbits[17], code_length_bits[17]);
-        writer->Write(3, 0b100);  // (3-2)*8+7 = 15
+        if (chunk_size == 16) {
+          // Encode gap between LZ77 symbols: 15 zeros.
+          writer->Write(code_length_nbits[17], code_length_bits[17]);
+          writer->Write(3, 0b000);  // 3
+          writer->Write(code_length_nbits[17], code_length_bits[17]);
+          writer->Write(3, 0b100);  // (3-2)*8+7 = 15
+        } else if (chunk_size == 8) {
+          // 7 zeros
+          writer->Write(code_length_nbits[17], code_length_bits[17]);
+          writer->Write(3, 0b100);  // 7
+        } else {
+          assert(chunk_size == 32);
+          // 31 zeros
+          writer->Write(code_length_nbits[17], code_length_bits[17]);
+          writer->Write(3, 0b010);  // 5
+          writer->Write(code_length_nbits[17], code_length_bits[17]);
+          writer->Write(3, 0b100);  // (5-2)*8+7 = 31
+        }
       }
     }
   }
 };
 
-#ifdef FJXL_AVX2
-#include <immintrin.h>
-void EncodeChunkAVX2(const uint16_t* residuals, const PrefixCode& code,
-                     BitWriter& output) {
-  auto value = _mm256_load_si256((__m256i*)residuals);
+template <typename T>
+struct VecPair {
+  T low;
+  T hi;
+};
 
-  // we know that residuals[i] has at most 12 bits, so we just need 3 nibbles
-  // and don't need to mask the third. However we do need to set the high
-  // byte to 0xFF, which will make table lookups return 0.
-  auto lo_nibble =
-      _mm256_or_si256(_mm256_and_si256(value, _mm256_set1_epi16(0xF)),
-                      _mm256_set1_epi16(0xFF00));
-  auto mi_nibble = _mm256_or_si256(
-      _mm256_and_si256(_mm256_srli_epi16(value, 4), _mm256_set1_epi16(0xF)),
-      _mm256_set1_epi16(0xFF00));
-  auto hi_nibble =
-      _mm256_or_si256(_mm256_srli_epi16(value, 8), _mm256_set1_epi16(0xFF00));
+#ifdef FJXL_GENERIC_SIMD
+#undef FJXL_GENERIC_SIMD
+#endif
 
-  auto lo_lut = _mm256_broadcastsi128_si256(
-      _mm_setr_epi8(0, 1, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4));
-  auto mi_lut = _mm256_broadcastsi128_si256(
-      _mm_setr_epi8(0, 5, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8, 8));
-  auto hi_lut = _mm256_broadcastsi128_si256(_mm_setr_epi8(
-      0, 9, 10, 10, 11, 11, 11, 11, 12, 12, 12, 12, 12, 12, 12, 12));
+#ifdef FJXL_AVX512
+#define FJXL_GENERIC_SIMD
+struct SIMDVec32 {
+  __m512i vec;
 
-  auto lo_token = _mm256_shuffle_epi8(lo_lut, lo_nibble);
-  auto mi_token = _mm256_shuffle_epi8(mi_lut, mi_nibble);
-  auto hi_token = _mm256_shuffle_epi8(hi_lut, hi_nibble);
+  static constexpr size_t kLanes = 16;
 
-  auto token = _mm256_max_epi16(lo_token, _mm256_max_epi16(mi_token, hi_token));
-  auto nbits = _mm256_subs_epu16(token, _mm256_set1_epi16(1));
-
-  // Compute 1<<nbits.
-  auto pow2_lo_lut = _mm256_broadcastsi128_si256(
-      _mm_setr_epi8(1 << 0, 1 << 1, 1 << 2, 1 << 3, 1 << 4, 1 << 5, 1 << 6,
-                    1u << 7, 0, 0, 0, 0, 0, 0, 0, 0));
-  auto pow2_hi_lut = _mm256_broadcastsi128_si256(
-      _mm_setr_epi8(0, 0, 0, 0, 0, 0, 0, 0, 1 << 0, 1 << 1, 1 << 2, 1 << 3,
-                    1 << 4, 1 << 5, 1 << 6, 1u << 7));
-
-  auto nbits_masked = _mm256_or_si256(nbits, _mm256_set1_epi16(0xFF00));
-
-  auto nbits_pow2_lo = _mm256_shuffle_epi8(pow2_lo_lut, nbits_masked);
-  auto nbits_pow2_hi = _mm256_shuffle_epi8(pow2_hi_lut, nbits_masked);
-
-  auto nbits_pow2 =
-      _mm256_or_si256(_mm256_slli_epi16(nbits_pow2_hi, 8), nbits_pow2_lo);
-
-  auto bits = _mm256_subs_epu16(value, nbits_pow2);
-
-  auto token_masked = _mm256_or_si256(token, _mm256_set1_epi16(0xFF00));
-
-  // huff_nbits <= 6.
-  auto huff_nbits =
-      _mm256_shuffle_epi8(_mm256_broadcastsi128_si256(
-                              _mm_load_si128((__m128i*)code.raw_nbits_simd)),
-                          token_masked);
-
-  auto huff_bits = _mm256_shuffle_epi8(
-      _mm256_broadcastsi128_si256(_mm_load_si128((__m128i*)code.raw_bits_simd)),
-      token_masked);
-
-  auto huff_nbits_masked =
-      _mm256_or_si256(huff_nbits, _mm256_set1_epi16(0xFF00));
-
-  auto bits_shifted = _mm256_mullo_epi16(
-      bits, _mm256_shuffle_epi8(pow2_lo_lut, huff_nbits_masked));
-
-  nbits = _mm256_add_epi16(nbits, huff_nbits);
-  bits = _mm256_or_si256(bits_shifted, huff_bits);
-
-  // Merge nbits and bits from 16-bit to 32-bit lanes.
-  auto nbits_hi16 = _mm256_srli_epi32(nbits, 16);
-  auto nbits_lo16 = _mm256_and_si256(nbits, _mm256_set1_epi32(0xFFFF));
-  auto bits_hi16 = _mm256_srli_epi32(bits, 16);
-  auto bits_lo16 = _mm256_and_si256(bits, _mm256_set1_epi32(0xFFFF));
-
-  nbits = _mm256_add_epi32(nbits_hi16, nbits_lo16);
-  bits = _mm256_or_si256(_mm256_sllv_epi32(bits_hi16, nbits_lo16), bits_lo16);
-
-  // Merge 32 -> 64 bit lanes.
-  auto nbits_hi32 = _mm256_srli_epi64(nbits, 32);
-  auto nbits_lo32 = _mm256_and_si256(nbits, _mm256_set1_epi64x(0xFFFFFFFF));
-  auto bits_hi32 = _mm256_srli_epi64(bits, 32);
-  auto bits_lo32 = _mm256_and_si256(bits, _mm256_set1_epi64x(0xFFFFFFFF));
-
-  nbits = _mm256_add_epi64(nbits_hi32, nbits_lo32);
-  bits = _mm256_or_si256(_mm256_sllv_epi64(bits_hi32, nbits_lo32), bits_lo32);
-
-  alignas(32) uint64_t nbits_simd[4] = {};
-  alignas(32) uint64_t bits_simd[4] = {};
-
-  _mm256_store_si256((__m256i*)nbits_simd, nbits);
-  _mm256_store_si256((__m256i*)bits_simd, bits);
-
-  // Manually merge the buffer bits with the SIMD bits.
-  // Necessary because Write() is only guaranteed to work with <=56 bits.
-  // Trying to SIMD-fy this code results in slower speed (and definitely less
-  // clarity).
-  {
-    for (size_t i = 0; i < 4; i++) {
-      output.buffer |= bits_simd[i] << output.bits_in_buffer;
-      memcpy(output.data.get() + output.bytes_written, &output.buffer, 8);
-      uint64_t shift = 64 - output.bits_in_buffer;
-      output.bits_in_buffer += nbits_simd[i];
-      // This `if` seems to be faster than using ternaries.
-      if (output.bits_in_buffer >= 64) {
-        uint64_t next_buffer = bits_simd[i] >> shift;
-        output.buffer = next_buffer;
-        output.bits_in_buffer -= 64;
-        output.bytes_written += 8;
-      }
-    }
-    memcpy(output.data.get() + output.bytes_written, &output.buffer, 8);
-    size_t bytes_in_buffer = output.bits_in_buffer / 8;
-    output.bits_in_buffer -= bytes_in_buffer * 8;
-    output.buffer >>= bytes_in_buffer * 8;
-    output.bytes_written += bytes_in_buffer;
+  FJXL_INLINE static SIMDVec32 Load(const uint32_t* data) {
+    return SIMDVec32{_mm512_loadu_si512((__m512i*)data)};
   }
+  FJXL_INLINE void Store(uint32_t* data) {
+    _mm512_store_si512((__m512i*)data, vec);
+  }
+  FJXL_INLINE static SIMDVec32 Val(uint32_t v) {
+    return SIMDVec32{_mm512_set1_epi32(v)};
+  }
+  FJXL_INLINE SIMDVec32 ValToToken() const {
+    return SIMDVec32{
+        _mm512_sub_epi32(_mm512_set1_epi32(32), _mm512_lzcnt_epi32(vec))};
+  }
+  FJXL_INLINE SIMDVec32 SatSubU(const SIMDVec32& to_subtract) const {
+    return SIMDVec32{_mm512_sub_epi32(_mm512_max_epu32(vec, to_subtract.vec),
+                                      to_subtract.vec)};
+  }
+  FJXL_INLINE SIMDVec32 Pow2() const {
+    return SIMDVec32{_mm512_sllv_epi32(_mm512_set1_epi32(1), vec)};
+  }
+};
+
+struct SIMDVec16;
+
+struct Mask16 {
+  __mmask32 mask;
+  SIMDVec16 IfThenElse(const SIMDVec16& if_true, const SIMDVec16& if_false);
+  Mask16 And(const Mask16& oth) const {
+    return Mask16{_kand_mask32(mask, oth.mask)};
+  }
+};
+
+struct SIMDVec16 {
+  __m512i vec;
+
+  static constexpr size_t kLanes = 32;
+
+  FJXL_INLINE static SIMDVec16 Load(const uint16_t* data) {
+    return SIMDVec16{_mm512_loadu_si512((__m512i*)data)};
+  }
+  FJXL_INLINE void Store(uint16_t* data) {
+    _mm512_store_si512((__m512i*)data, vec);
+  }
+  FJXL_INLINE static SIMDVec16 Val(uint16_t v) {
+    return SIMDVec16{_mm512_set1_epi16(v)};
+  }
+  FJXL_INLINE static SIMDVec16 FromTwo32(const SIMDVec32& lo,
+                                         const SIMDVec32& hi) {
+    auto tmp = _mm512_packus_epi32(lo.vec, hi.vec);
+    alignas(64) uint64_t perm[8] = {0, 2, 4, 6, 1, 3, 5, 7};
+    return SIMDVec16{
+        _mm512_permutex2var_epi64(tmp, _mm512_load_si512((__m512i*)perm), tmp)};
+  }
+
+  FJXL_INLINE SIMDVec16 ValToToken() const {
+    auto c16 = _mm512_set1_epi32(16);
+    auto c32 = _mm512_set1_epi32(32);
+    auto low16bit = _mm512_set1_epi32(0x0000FFFF);
+    auto lzhi =
+        _mm512_sub_epi32(c16, _mm512_min_epu32(c16, _mm512_lzcnt_epi32(vec)));
+    auto lzlo = _mm512_sub_epi32(
+        c32, _mm512_lzcnt_epi32(_mm512_and_si512(low16bit, vec)));
+    return SIMDVec16{_mm512_or_si512(lzlo, _mm512_slli_epi32(lzhi, 16))};
+  }
+
+  FJXL_INLINE SIMDVec16 SatSubU(const SIMDVec16& to_subtract) const {
+    return SIMDVec16{_mm512_subs_epu16(vec, to_subtract.vec)};
+  }
+  FJXL_INLINE SIMDVec16 Min(const SIMDVec16& oth) const {
+    return SIMDVec16{_mm512_min_epu16(vec, oth.vec)};
+  }
+  FJXL_INLINE Mask16 Eq(const SIMDVec16& oth) const {
+    return Mask16{_mm512_cmpeq_epi16_mask(vec, oth.vec)};
+  }
+  // Undefined whether this uses signed or unsigned semantics.
+  FJXL_INLINE Mask16 Gt(const SIMDVec16& oth) const {
+    return Mask16{_mm512_cmpgt_epi16_mask(vec, oth.vec)};
+  }
+  FJXL_INLINE SIMDVec16 Pow2() const {
+    return SIMDVec16{_mm512_sllv_epi16(_mm512_set1_epi16(1), vec)};
+  }
+  FJXL_INLINE SIMDVec16 Or(const SIMDVec16& oth) const {
+    return SIMDVec16{_mm512_or_si512(vec, oth.vec)};
+  }
+  FJXL_INLINE SIMDVec16 And(const SIMDVec16& oth) const {
+    return SIMDVec16{_mm512_and_si512(vec, oth.vec)};
+  }
+  FJXL_INLINE SIMDVec16 HAdd(const SIMDVec16& oth) const {
+    return SIMDVec16{_mm512_srai_epi16(_mm512_add_epi16(vec, oth.vec), 1)};
+  }
+  FJXL_INLINE SIMDVec16 PrepareForU8Lookup() const {
+    return SIMDVec16{_mm512_or_si512(vec, _mm512_set1_epi16(0xFF00))};
+  }
+  FJXL_INLINE SIMDVec16 U8Lookup(const uint8_t* table) const {
+    return SIMDVec16{_mm512_shuffle_epi8(
+        _mm512_broadcast_i32x4(_mm_loadu_si128((__m128i*)table)), vec)};
+  }
+  FJXL_INLINE VecPair<SIMDVec16> Interleave(const SIMDVec16& low) const {
+    auto lo = _mm512_unpacklo_epi16(low.vec, vec);
+    auto hi = _mm512_unpackhi_epi16(low.vec, vec);
+    alignas(64) uint64_t perm1[8] = {0, 1, 8, 9, 2, 3, 10, 11};
+    alignas(64) uint64_t perm2[8] = {4, 5, 12, 13, 6, 7, 14, 15};
+    return {SIMDVec16{_mm512_permutex2var_epi64(
+                lo, _mm512_load_si512((__m512i*)perm1), hi)},
+            SIMDVec16{_mm512_permutex2var_epi64(
+                lo, _mm512_load_si512((__m512i*)perm2), hi)}};
+  }
+  FJXL_INLINE VecPair<SIMDVec32> Upcast() const {
+    auto lo = _mm512_unpacklo_epi16(vec, _mm512_setzero_si512());
+    auto hi = _mm512_unpackhi_epi16(vec, _mm512_setzero_si512());
+    alignas(64) uint64_t perm1[8] = {0, 1, 8, 9, 2, 3, 10, 11};
+    alignas(64) uint64_t perm2[8] = {4, 5, 12, 13, 6, 7, 14, 15};
+    return {SIMDVec32{_mm512_permutex2var_epi64(
+                lo, _mm512_load_si512((__m512i*)perm1), hi)},
+            SIMDVec32{_mm512_permutex2var_epi64(
+                lo, _mm512_load_si512((__m512i*)perm2), hi)}};
+  }
+};
+
+SIMDVec16 Mask16::IfThenElse(const SIMDVec16& if_true,
+                             const SIMDVec16& if_false) {
+  return SIMDVec16{_mm512_mask_blend_epi16(mask, if_false.vec, if_true.vec)};
 }
+
+struct Bits64 {
+  static constexpr size_t kLanes = 8;
+
+  __m512i nbits;
+  __m512i bits;
+
+  FJXL_INLINE void Store(uint64_t* nbits_out, uint64_t* bits_out) {
+    _mm512_store_si512((__m512i*)nbits_out, nbits);
+    _mm512_store_si512((__m512i*)bits_out, bits);
+  }
+};
+
+struct Bits32 {
+  __m512i nbits;
+  __m512i bits;
+
+  static Bits32 FromRaw(SIMDVec32 nbits, SIMDVec32 bits) {
+    return Bits32{nbits.vec, bits.vec};
+  }
+
+  Bits64 Merge() const {
+    auto nbits_hi32 = _mm512_srli_epi64(nbits, 32);
+    auto nbits_lo32 = _mm512_and_si512(nbits, _mm512_set1_epi64(0xFFFFFFFF));
+    auto bits_hi32 = _mm512_srli_epi64(bits, 32);
+    auto bits_lo32 = _mm512_and_si512(bits, _mm512_set1_epi64(0xFFFFFFFF));
+
+    auto nbits64 = _mm512_add_epi64(nbits_hi32, nbits_lo32);
+    auto bits64 =
+        _mm512_or_si512(_mm512_sllv_epi64(bits_hi32, nbits_lo32), bits_lo32);
+    return Bits64{nbits64, bits64};
+  }
+
+  void Interleave(const Bits32& low) {
+    bits = _mm512_or_si512(_mm512_sllv_epi32(bits, low.nbits), low.bits);
+    nbits = _mm512_add_epi32(nbits, low.nbits);
+  }
+};
+
+struct Bits16 {
+  __m512i nbits;
+  __m512i bits;
+
+  static Bits16 FromRaw(SIMDVec16 nbits, SIMDVec16 bits) {
+    return Bits16{nbits.vec, bits.vec};
+  }
+
+  Bits32 Merge() const {
+    auto nbits_hi16 = _mm512_srli_epi32(nbits, 16);
+    auto nbits_lo16 = _mm512_and_si512(nbits, _mm512_set1_epi32(0xFFFF));
+    auto bits_hi16 = _mm512_srli_epi32(bits, 16);
+    auto bits_lo16 = _mm512_and_si512(bits, _mm512_set1_epi32(0xFFFF));
+
+    auto nbits32 = _mm512_add_epi32(nbits_hi16, nbits_lo16);
+    auto bits32 =
+        _mm512_or_si512(_mm512_sllv_epi32(bits_hi16, nbits_lo16), bits_lo16);
+    return Bits32{nbits32, bits32};
+  }
+
+  void Interleave(const Bits16& low) {
+    bits = _mm512_or_si512(_mm512_sllv_epi16(bits, low.nbits), low.bits);
+    nbits = _mm512_add_epi16(nbits, low.nbits);
+  }
+};
+
+#endif
+
+#ifdef FJXL_AVX2
+#define FJXL_GENERIC_SIMD
+#include <immintrin.h>
+struct SIMDVec32 {
+  __m256i vec;
+
+  static constexpr size_t kLanes = 8;
+
+  FJXL_INLINE static SIMDVec32 Load(const uint32_t* data) {
+    return SIMDVec32{_mm256_loadu_si256((__m256i*)data)};
+  }
+  FJXL_INLINE void Store(uint32_t* data) {
+    _mm256_store_si256((__m256i*)data, vec);
+  }
+  FJXL_INLINE static SIMDVec32 Val(uint32_t v) {
+    return SIMDVec32{_mm256_set1_epi32(v)};
+  }
+  FJXL_INLINE SIMDVec32 ValToToken() const {
+    // we know that each value has at most 20 bits, so we just need 5 nibbles
+    // and don't need to mask the fifth. However we do need to set the higher
+    // bytes to 0xFF, which will make table lookups return 0.
+    auto nibble0 =
+        _mm256_or_si256(_mm256_and_si256(vec, _mm256_set1_epi32(0xF)),
+                        _mm256_set1_epi32(0xFFFFFF00));
+    auto nibble1 = _mm256_or_si256(
+        _mm256_and_si256(_mm256_srli_epi32(vec, 4), _mm256_set1_epi32(0xF)),
+        _mm256_set1_epi32(0xFFFFFF00));
+    auto nibble2 = _mm256_or_si256(
+        _mm256_and_si256(_mm256_srli_epi32(vec, 8), _mm256_set1_epi32(0xF)),
+        _mm256_set1_epi32(0xFFFFFF00));
+    auto nibble3 = _mm256_or_si256(
+        _mm256_and_si256(_mm256_srli_epi32(vec, 12), _mm256_set1_epi32(0xF)),
+        _mm256_set1_epi32(0xFFFFFF00));
+    auto nibble4 = _mm256_or_si256(_mm256_srli_epi32(vec, 16),
+                                   _mm256_set1_epi32(0xFFFFFF00));
+
+    auto lut0 = _mm256_broadcastsi128_si256(
+        _mm_setr_epi8(0, 1, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4));
+    auto lut1 = _mm256_broadcastsi128_si256(
+        _mm_setr_epi8(0, 5, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8, 8));
+    auto lut2 = _mm256_broadcastsi128_si256(_mm_setr_epi8(
+        0, 9, 10, 10, 11, 11, 11, 11, 12, 12, 12, 12, 12, 12, 12, 12));
+    auto lut3 = _mm256_broadcastsi128_si256(_mm_setr_epi8(
+        0, 13, 14, 14, 15, 15, 15, 15, 16, 16, 16, 16, 16, 16, 16, 16));
+    auto lut4 = _mm256_broadcastsi128_si256(_mm_setr_epi8(
+        0, 17, 18, 18, 19, 19, 19, 19, 20, 20, 20, 20, 20, 20, 20, 20));
+
+    auto token0 = _mm256_shuffle_epi8(lut0, nibble0);
+    auto token1 = _mm256_shuffle_epi8(lut1, nibble1);
+    auto token2 = _mm256_shuffle_epi8(lut2, nibble2);
+    auto token3 = _mm256_shuffle_epi8(lut3, nibble3);
+    auto token4 = _mm256_shuffle_epi8(lut4, nibble4);
+
+    auto token =
+        _mm256_max_epi32(_mm256_max_epi32(_mm256_max_epi32(token0, token1),
+                                          _mm256_max_epi32(token2, token3)),
+                         token4);
+    return SIMDVec32{token};
+  }
+  FJXL_INLINE SIMDVec32 SatSubU(const SIMDVec32& to_subtract) const {
+    return SIMDVec32{_mm256_sub_epi32(_mm256_max_epu32(vec, to_subtract.vec),
+                                      to_subtract.vec)};
+  }
+  FJXL_INLINE SIMDVec32 Pow2() const {
+    return SIMDVec32{_mm256_sllv_epi32(_mm256_set1_epi32(1), vec)};
+  }
+};
+
+struct SIMDVec16;
+
+struct Mask16 {
+  __m256i mask;
+  SIMDVec16 IfThenElse(const SIMDVec16& if_true, const SIMDVec16& if_false);
+  Mask16 And(const Mask16& oth) const {
+    return Mask16{_mm256_and_si256(mask, oth.mask)};
+  }
+};
+
+struct SIMDVec16 {
+  __m256i vec;
+
+  static constexpr size_t kLanes = 16;
+
+  FJXL_INLINE static SIMDVec16 Load(const uint16_t* data) {
+    return SIMDVec16{_mm256_loadu_si256((__m256i*)data)};
+  }
+  FJXL_INLINE void Store(uint16_t* data) {
+    _mm256_store_si256((__m256i*)data, vec);
+  }
+  FJXL_INLINE static SIMDVec16 Val(uint16_t v) {
+    return SIMDVec16{_mm256_set1_epi16(v)};
+  }
+  FJXL_INLINE static SIMDVec16 FromTwo32(const SIMDVec32& lo,
+                                         const SIMDVec32& hi) {
+    auto tmp = _mm256_packus_epi32(lo.vec, hi.vec);
+    return SIMDVec16{_mm256_permute4x64_epi64(tmp, 0b11011000)};
+  }
+
+  FJXL_INLINE SIMDVec16 ValToToken() const {
+    auto nibble0 =
+        _mm256_or_si256(_mm256_and_si256(vec, _mm256_set1_epi16(0xF)),
+                        _mm256_set1_epi16(0xFF00));
+    auto nibble1 = _mm256_or_si256(
+        _mm256_and_si256(_mm256_srli_epi16(vec, 4), _mm256_set1_epi16(0xF)),
+        _mm256_set1_epi16(0xFF00));
+    auto nibble2 = _mm256_or_si256(
+        _mm256_and_si256(_mm256_srli_epi16(vec, 8), _mm256_set1_epi16(0xF)),
+        _mm256_set1_epi16(0xFF00));
+    auto nibble3 =
+        _mm256_or_si256(_mm256_srli_epi16(vec, 12), _mm256_set1_epi16(0xFF00));
+
+    auto lut0 = _mm256_broadcastsi128_si256(
+        _mm_setr_epi8(0, 1, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4));
+    auto lut1 = _mm256_broadcastsi128_si256(
+        _mm_setr_epi8(0, 5, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8, 8));
+    auto lut2 = _mm256_broadcastsi128_si256(_mm_setr_epi8(
+        0, 9, 10, 10, 11, 11, 11, 11, 12, 12, 12, 12, 12, 12, 12, 12));
+    auto lut3 = _mm256_broadcastsi128_si256(_mm_setr_epi8(
+        0, 13, 14, 14, 15, 15, 15, 15, 16, 16, 16, 16, 16, 16, 16, 16));
+
+    auto token0 = _mm256_shuffle_epi8(lut0, nibble0);
+    auto token1 = _mm256_shuffle_epi8(lut1, nibble1);
+    auto token2 = _mm256_shuffle_epi8(lut2, nibble2);
+    auto token3 = _mm256_shuffle_epi8(lut3, nibble3);
+
+    auto token = _mm256_max_epi16(_mm256_max_epi16(token0, token1),
+                                  _mm256_max_epi16(token2, token3));
+    return SIMDVec16{token};
+  }
+
+  FJXL_INLINE SIMDVec16 SatSubU(const SIMDVec16& to_subtract) const {
+    return SIMDVec16{_mm256_subs_epu16(vec, to_subtract.vec)};
+  }
+  FJXL_INLINE SIMDVec16 Min(const SIMDVec16& oth) const {
+    return SIMDVec16{_mm256_min_epu16(vec, oth.vec)};
+  }
+  FJXL_INLINE Mask16 Eq(const SIMDVec16& oth) const {
+    return Mask16{_mm256_cmpeq_epi16(vec, oth.vec)};
+  }
+  // Undefined whether this uses signed or unsigned semantics.
+  FJXL_INLINE Mask16 Gt(const SIMDVec16& oth) const {
+    return Mask16{_mm256_cmpgt_epi16(vec, oth.vec)};
+  }
+  FJXL_INLINE SIMDVec16 Pow2() const {
+    auto pow2_lo_lut = _mm256_broadcastsi128_si256(
+        _mm_setr_epi8(1 << 0, 1 << 1, 1 << 2, 1 << 3, 1 << 4, 1 << 5, 1 << 6,
+                      1u << 7, 0, 0, 0, 0, 0, 0, 0, 0));
+    auto pow2_hi_lut = _mm256_broadcastsi128_si256(
+        _mm_setr_epi8(0, 0, 0, 0, 0, 0, 0, 0, 1 << 0, 1 << 1, 1 << 2, 1 << 3,
+                      1 << 4, 1 << 5, 1 << 6, 1u << 7));
+
+    auto masked = _mm256_or_si256(vec, _mm256_set1_epi16(0xFF00));
+
+    auto pow2_lo = _mm256_shuffle_epi8(pow2_lo_lut, masked);
+    auto pow2_hi = _mm256_shuffle_epi8(pow2_hi_lut, masked);
+
+    auto pow2 = _mm256_or_si256(_mm256_slli_epi16(pow2_hi, 8), pow2_lo);
+    return SIMDVec16{pow2};
+  }
+  FJXL_INLINE SIMDVec16 Or(const SIMDVec16& oth) const {
+    return SIMDVec16{_mm256_or_si256(vec, oth.vec)};
+  }
+  FJXL_INLINE SIMDVec16 And(const SIMDVec16& oth) const {
+    return SIMDVec16{_mm256_and_si256(vec, oth.vec)};
+  }
+  FJXL_INLINE SIMDVec16 HAdd(const SIMDVec16& oth) const {
+    return SIMDVec16{_mm256_srai_epi16(_mm256_add_epi16(vec, oth.vec), 1)};
+  }
+  FJXL_INLINE SIMDVec16 PrepareForU8Lookup() const {
+    return SIMDVec16{_mm256_or_si256(vec, _mm256_set1_epi16(0xFF00))};
+  }
+  FJXL_INLINE SIMDVec16 U8Lookup(const uint8_t* table) const {
+    return SIMDVec16{_mm256_shuffle_epi8(
+        _mm256_broadcastsi128_si256(_mm_loadu_si128((__m128i*)table)), vec)};
+  }
+  FJXL_INLINE VecPair<SIMDVec16> Interleave(const SIMDVec16& low) const {
+    auto v02 = _mm256_unpacklo_epi16(low.vec, vec);
+    auto v13 = _mm256_unpackhi_epi16(low.vec, vec);
+    return {SIMDVec16{_mm256_permute2x128_si256(v02, v13, 0x20)},
+            SIMDVec16{_mm256_permute2x128_si256(v02, v13, 0x31)}};
+  }
+  FJXL_INLINE VecPair<SIMDVec32> Upcast() const {
+    auto v02 = _mm256_unpacklo_epi16(vec, _mm256_setzero_si256());
+    auto v13 = _mm256_unpackhi_epi16(vec, _mm256_setzero_si256());
+    return {SIMDVec32{_mm256_permute2x128_si256(v02, v13, 0x20)},
+            SIMDVec32{_mm256_permute2x128_si256(v02, v13, 0x31)}};
+  }
+};
+
+SIMDVec16 Mask16::IfThenElse(const SIMDVec16& if_true,
+                             const SIMDVec16& if_false) {
+  return SIMDVec16{_mm256_blendv_epi8(if_false.vec, if_true.vec, mask)};
+}
+
+struct Bits64 {
+  static constexpr size_t kLanes = 4;
+
+  __m256i nbits;
+  __m256i bits;
+
+  FJXL_INLINE void Store(uint64_t* nbits_out, uint64_t* bits_out) {
+    _mm256_store_si256((__m256i*)nbits_out, nbits);
+    _mm256_store_si256((__m256i*)bits_out, bits);
+  }
+};
+
+struct Bits32 {
+  __m256i nbits;
+  __m256i bits;
+
+  static Bits32 FromRaw(SIMDVec32 nbits, SIMDVec32 bits) {
+    return Bits32{nbits.vec, bits.vec};
+  }
+
+  Bits64 Merge() const {
+    auto nbits_hi32 = _mm256_srli_epi64(nbits, 32);
+    auto nbits_lo32 = _mm256_and_si256(nbits, _mm256_set1_epi64x(0xFFFFFFFF));
+    auto bits_hi32 = _mm256_srli_epi64(bits, 32);
+    auto bits_lo32 = _mm256_and_si256(bits, _mm256_set1_epi64x(0xFFFFFFFF));
+
+    auto nbits64 = _mm256_add_epi64(nbits_hi32, nbits_lo32);
+    auto bits64 =
+        _mm256_or_si256(_mm256_sllv_epi64(bits_hi32, nbits_lo32), bits_lo32);
+    return Bits64{nbits64, bits64};
+  }
+
+  void Interleave(const Bits32& low) {
+    bits = _mm256_or_si256(_mm256_sllv_epi32(bits, low.nbits), low.bits);
+    nbits = _mm256_add_epi32(nbits, low.nbits);
+  }
+};
+
+struct Bits16 {
+  __m256i nbits;
+  __m256i bits;
+
+  static Bits16 FromRaw(SIMDVec16 nbits, SIMDVec16 bits) {
+    return Bits16{nbits.vec, bits.vec};
+  }
+
+  Bits32 Merge() const {
+    auto nbits_hi16 = _mm256_srli_epi32(nbits, 16);
+    auto nbits_lo16 = _mm256_and_si256(nbits, _mm256_set1_epi32(0xFFFF));
+    auto bits_hi16 = _mm256_srli_epi32(bits, 16);
+    auto bits_lo16 = _mm256_and_si256(bits, _mm256_set1_epi32(0xFFFF));
+
+    auto nbits32 = _mm256_add_epi32(nbits_hi16, nbits_lo16);
+    auto bits32 =
+        _mm256_or_si256(_mm256_sllv_epi32(bits_hi16, nbits_lo16), bits_lo16);
+    return Bits32{nbits32, bits32};
+  }
+
+  void Interleave(const Bits16& low) {
+    auto pow2_lo_lut = _mm256_broadcastsi128_si256(
+        _mm_setr_epi8(1 << 0, 1 << 1, 1 << 2, 1 << 3, 1 << 4, 1 << 5, 1 << 6,
+                      1u << 7, 0, 0, 0, 0, 0, 0, 0, 0));
+    auto low_nbits_masked =
+        _mm256_or_si256(low.nbits, _mm256_set1_epi16(0xFF00));
+
+    auto bits_shifted = _mm256_mullo_epi16(
+        bits, _mm256_shuffle_epi8(pow2_lo_lut, low_nbits_masked));
+
+    nbits = _mm256_add_epi16(nbits, low.nbits);
+    bits = _mm256_or_si256(bits_shifted, low.bits);
+  }
+};
+
 #endif
 
 #ifdef FJXL_NEON
-#include <arm_neon.h>
+#define FJXL_GENERIC_SIMD
+struct SIMDVec32 {
+  uint32x4_t vec;
 
-FJXL_INLINE void TokenizeNeon(const uint16_t* residuals, uint16_t* token_out,
+  static constexpr size_t kLanes = 4;
+
+  FJXL_INLINE static SIMDVec32 Load(const uint32_t* data) {
+    return SIMDVec32{vld1q_u32(data)};
+  }
+  FJXL_INLINE void Store(uint32_t* data) { vst1q_u32(data, vec); }
+  FJXL_INLINE static SIMDVec32 Val(uint32_t v) {
+    return SIMDVec32{vdupq_n_u32(v)};
+  }
+  FJXL_INLINE SIMDVec32 ValToToken() const {
+    return SIMDVec32{vsubq_u32(vdupq_n_u32(32), vclzq_u32(vec))};
+  }
+  FJXL_INLINE SIMDVec32 SatSubU(const SIMDVec32& to_subtract) const {
+    return SIMDVec32{vqsubq_u32(vec, to_subtract.vec)};
+  }
+  FJXL_INLINE SIMDVec32 Pow2() const {
+    return SIMDVec32{vshlq_u32(vdupq_n_u32(1), vreinterpretq_s32_u32(vec))};
+  }
+};
+
+struct SIMDVec16;
+
+struct Mask16 {
+  uint16x8_t mask;
+  SIMDVec16 IfThenElse(const SIMDVec16& if_true, const SIMDVec16& if_false);
+  Mask16 And(const Mask16& oth) const {
+    return Mask16{vandq_u16(mask, oth.mask)};
+  }
+};
+
+struct SIMDVec16 {
+  uint16x8_t vec;
+
+  static constexpr size_t kLanes = 8;
+
+  FJXL_INLINE static SIMDVec16 Load(const uint16_t* data) {
+    return SIMDVec16{vld1q_u16(data)};
+  }
+  FJXL_INLINE void Store(uint16_t* data) { vst1q_u16(data, vec); }
+  FJXL_INLINE static SIMDVec16 Val(uint16_t v) {
+    return SIMDVec16{vdupq_n_u16(v)};
+  }
+  FJXL_INLINE static SIMDVec16 FromTwo32(const SIMDVec32& lo,
+                                         const SIMDVec32& hi) {
+    return SIMDVec16{vmovn_high_u32(vmovn_u32(lo.vec), hi.vec)};
+  }
+
+  FJXL_INLINE SIMDVec16 ValToToken() const {
+    return SIMDVec16{vsubq_u16(vdupq_n_u16(16), vclzq_u16(vec))};
+  }
+  FJXL_INLINE SIMDVec16 SatSubU(const SIMDVec16& to_subtract) const {
+    return SIMDVec16{vqsubq_u16(vec, to_subtract.vec)};
+  }
+  FJXL_INLINE SIMDVec16 Min(const SIMDVec16& oth) const {
+    return SIMDVec16{vminq_u16(vec, oth.vec)};
+  }
+  FJXL_INLINE Mask16 Eq(const SIMDVec16& oth) const {
+    return Mask16{vceqq_u16(vec, oth.vec)};
+  }
+  FJXL_INLINE Mask16 Gt(const SIMDVec16& oth) const {
+    return Mask16{vcgtq_u16(vec, oth.vec)};
+  }
+  FJXL_INLINE SIMDVec16 Pow2() const {
+    return SIMDVec16{vshlq_u16(vdupq_n_u16(1), vreinterpretq_s16_u16(vec))};
+  }
+  FJXL_INLINE SIMDVec16 Or(const SIMDVec16& oth) const {
+    return SIMDVec16{vorrq_u16(vec, oth.vec)};
+  }
+  FJXL_INLINE SIMDVec16 And(const SIMDVec16& oth) const {
+    return SIMDVec16{vandq_u16(vec, oth.vec)};
+  }
+  FJXL_INLINE SIMDVec16 HAdd(const SIMDVec16& oth) const {
+    return SIMDVec16{vhaddq_u16(vec, oth.vec)};
+  }
+  FJXL_INLINE SIMDVec16 PrepareForU8Lookup() const {
+    return SIMDVec16{vorrq_u16(vec, vdupq_n_u16(0xFF00))};
+  }
+  FJXL_INLINE SIMDVec16 U8Lookup(const uint8_t* table) const {
+    uint8x16_t tbl = vld1q_u8(table);
+    uint8x16_t indices = vreinterpretq_u8_u16(vec);
+    return SIMDVec16{vreinterpretq_u16_u8(vqtbl1q_u8(tbl, indices))};
+  }
+  FJXL_INLINE VecPair<SIMDVec16> Interleave(const SIMDVec16& low) const {
+    return {SIMDVec16{vzip1q_u16(low.vec, vec)},
+            SIMDVec16{vzip2q_u16(low.vec, vec)}};
+  }
+  FJXL_INLINE VecPair<SIMDVec32> Upcast() const {
+    uint32x4_t lo = vmovl_u16(vget_low_u16(vec));
+    uint32x4_t hi = vmovl_high_u16(vec);
+    return {SIMDVec32{lo}, SIMDVec32{hi}};
+  }
+};
+
+SIMDVec16 Mask16::IfThenElse(const SIMDVec16& if_true,
+                             const SIMDVec16& if_false) {
+  return SIMDVec16{vbslq_u16(mask, if_true.vec, if_false.vec)};
+}
+
+struct Bits64 {
+  static constexpr size_t kLanes = 2;
+
+  uint64x2_t nbits;
+  uint64x2_t bits;
+
+  FJXL_INLINE void Store(uint64_t* nbits_out, uint64_t* bits_out) {
+    vst1q_u64(nbits_out, nbits);
+    vst1q_u64(bits_out, bits);
+  }
+};
+
+struct Bits32 {
+  uint32x4_t nbits;
+  uint32x4_t bits;
+
+  static Bits32 FromRaw(SIMDVec32 nbits, SIMDVec32 bits) {
+    return Bits32{nbits.vec, bits.vec};
+  }
+
+  Bits64 Merge() const {
+    // TODO(veluca): can probably be optimized.
+    uint64x2_t nbits_lo32 =
+        vandq_u64(vreinterpretq_u64_u32(nbits), vdupq_n_u64(0xFFFFFFFF));
+    uint64x2_t bits_hi32 =
+        vshlq_u64(vshrq_n_u64(vreinterpretq_u64_u32(bits), 32),
+                  vreinterpretq_s64_u64(nbits_lo32));
+    uint64x2_t bits_lo32 =
+        vandq_u64(vreinterpretq_u64_u32(bits), vdupq_n_u64(0xFFFFFFFF));
+    uint64x2_t nbits64 =
+        vsraq_n_u64(nbits_lo32, vreinterpretq_u64_u32(nbits), 32);
+    uint64x2_t bits64 = vorrq_u64(bits_hi32, bits_lo32);
+    return Bits64{nbits64, bits64};
+  }
+
+  void Interleave(const Bits32& low) {
+    bits =
+        vorrq_u32(vshlq_u32(bits, vreinterpretq_s32_u32(low.nbits)), low.bits);
+    nbits = vaddq_u32(nbits, low.nbits);
+  }
+};
+
+struct Bits16 {
+  uint16x8_t nbits;
+  uint16x8_t bits;
+
+  static Bits16 FromRaw(SIMDVec16 nbits, SIMDVec16 bits) {
+    return Bits16{nbits.vec, bits.vec};
+  }
+
+  Bits32 Merge() const {
+    // TODO(veluca): can probably be optimized.
+    uint32x4_t nbits_lo16 =
+        vandq_u32(vreinterpretq_u32_u16(nbits), vdupq_n_u32(0xFFFF));
+    uint32x4_t bits_hi16 =
+        vshlq_u32(vshrq_n_u32(vreinterpretq_u32_u16(bits), 16),
+                  vreinterpretq_s32_u32(nbits_lo16));
+    uint32x4_t bits_lo16 =
+        vandq_u32(vreinterpretq_u32_u16(bits), vdupq_n_u32(0xFFFF));
+    uint32x4_t nbits32 =
+        vsraq_n_u32(nbits_lo16, vreinterpretq_u32_u16(nbits), 16);
+    uint32x4_t bits32 = vorrq_u32(bits_hi16, bits_lo16);
+    return Bits32{nbits32, bits32};
+  }
+
+  void Interleave(const Bits16& low) {
+    bits =
+        vorrq_u16(vshlq_u16(bits, vreinterpretq_s16_u16(low.nbits)), low.bits);
+    nbits = vaddq_u16(nbits, low.nbits);
+  }
+};
+
+#endif
+
+#ifdef FJXL_GENERIC_SIMD
+
+//  Each of these functions will process SIMDVec16::kLanes worth of values.
+
+FJXL_INLINE void TokenizeSIMD(const uint16_t* residuals, uint16_t* token_out,
                               uint16_t* nbits_out, uint16_t* bits_out) {
-  uint16x8_t res = vld1q_u16(residuals);
-  uint16x8_t token = vsubq_u16(vdupq_n_u16(16), vclzq_u16(res));
-  uint16x8_t nbits = vqsubq_u16(token, vdupq_n_u16(1));
-  uint16x8_t bits =
-      vqsubq_u16(res, vshlq_u16(vdupq_n_u16(1), vreinterpretq_s16_u16(nbits)));
-  vst1q_u16(token_out, token);
-  vst1q_u16(nbits_out, nbits);
-  vst1q_u16(bits_out, bits);
+  SIMDVec16 res = SIMDVec16::Load(residuals);
+  SIMDVec16 token = res.ValToToken();
+  SIMDVec16 nbits = token.SatSubU(SIMDVec16::Val(1));
+  SIMDVec16 bits = res.SatSubU(nbits.Pow2());
+  token.Store(token_out);
+  nbits.Store(nbits_out);
+  bits.Store(bits_out);
 }
 
-FJXL_INLINE void TokenizeNeon(const uint32_t* residuals, uint16_t* token_out,
+FJXL_INLINE void TokenizeSIMD(const uint32_t* residuals, uint16_t* token_out,
                               uint32_t* nbits_out, uint32_t* bits_out) {
-  uint32x4_t res_lo = vld1q_u32(residuals);
-  uint32x4_t res_hi = vld1q_u32(residuals + 4);
-  uint32x4_t token_lo = vsubq_u32(vdupq_n_u32(32), vclzq_u32(res_lo));
-  uint32x4_t token_hi = vsubq_u32(vdupq_n_u32(32), vclzq_u32(res_hi));
-  uint32x4_t nbits_lo = vqsubq_u32(token_lo, vdupq_n_u32(1));
-  uint32x4_t nbits_hi = vqsubq_u32(token_hi, vdupq_n_u32(1));
-  uint32x4_t bits_lo = vqsubq_u32(
-      res_lo, vshlq_u32(vdupq_n_u32(1), vreinterpretq_s32_u32(nbits_lo)));
-  uint32x4_t bits_hi = vqsubq_u32(
-      res_hi, vshlq_u32(vdupq_n_u32(1), vreinterpretq_s32_u32(nbits_hi)));
-  uint16x8_t token = vmovn_high_u32(vmovn_u32(token_lo), token_hi);
-  vst1q_u16(token_out, token);
-  vst1q_u32(nbits_out, nbits_lo);
-  vst1q_u32(nbits_out + 4, nbits_hi);
-  vst1q_u32(bits_out, bits_lo);
-  vst1q_u32(bits_out + 4, bits_hi);
+  static_assert(SIMDVec16::kLanes == 2 * SIMDVec32::kLanes, "");
+  SIMDVec32 res_lo = SIMDVec32::Load(residuals);
+  SIMDVec32 res_hi = SIMDVec32::Load(residuals + SIMDVec32::kLanes);
+  SIMDVec32 token_lo = res_lo.ValToToken();
+  SIMDVec32 token_hi = res_hi.ValToToken();
+  SIMDVec32 nbits_lo = token_lo.SatSubU(SIMDVec32::Val(1));
+  SIMDVec32 nbits_hi = token_hi.SatSubU(SIMDVec32::Val(1));
+  SIMDVec32 bits_lo = res_lo.SatSubU(nbits_lo.Pow2());
+  SIMDVec32 bits_hi = res_hi.SatSubU(nbits_hi.Pow2());
+  SIMDVec16 token = SIMDVec16::FromTwo32(token_lo, token_hi);
+  token.Store(token_out);
+  nbits_lo.Store(nbits_out);
+  nbits_hi.Store(nbits_out + SIMDVec32::kLanes);
+  bits_lo.Store(bits_out);
+  bits_hi.Store(bits_out + SIMDVec32::kLanes);
 }
 
-FJXL_INLINE void HuffmanNeonUpTo13(const uint16_t* tokens,
+FJXL_INLINE void HuffmanSIMDUpTo13(const uint16_t* tokens,
                                    const PrefixCode& code, uint16_t* nbits_out,
                                    uint16_t* bits_out) {
-  uint8x16_t tok8x16 =
-      vreinterpretq_u8_u16(vorrq_u16(vld1q_u16(tokens), vdupq_n_u16(0xFF00)));
-  uint16x8_t huff_bits =
-      vreinterpretq_u16_u8(vqtbl1q_u8(vld1q_u8(code.raw_bits_simd), tok8x16));
-  uint16x8_t huff_nbits =
-      vreinterpretq_u16_u8(vqtbl1q_u8(vld1q_u8(code.raw_nbits_simd), tok8x16));
-  vst1q_u16(nbits_out, huff_nbits);
-  vst1q_u16(bits_out, huff_bits);
+  SIMDVec16 tok = SIMDVec16::Load(tokens).PrepareForU8Lookup();
+  tok.U8Lookup(code.raw_nbits_simd).Store(nbits_out);
+  tok.U8Lookup(code.raw_bits_simd).Store(bits_out);
 }
 
-FJXL_INLINE void HuffmanNeon14(const uint16_t* tokens, const PrefixCode& code,
+FJXL_INLINE void HuffmanSIMD14(const uint16_t* tokens, const PrefixCode& code,
                                uint16_t* nbits_out, uint16_t* bits_out) {
-  uint16x8_t tok_cap = vdupq_n_u16(15);
-  uint16x8_t tok = vld1q_u16(tokens);
-  uint8x16_t tokindex = vreinterpretq_u8_u16(
-      vorrq_u16(vminq_u16(tok, tok_cap), vdupq_n_u16(0xFF00)));
-  uint16x8_t huff_bits_pre =
-      vreinterpretq_u16_u8(vqtbl1q_u8(vld1q_u8(code.raw_bits_simd), tokindex));
+  SIMDVec16 token_cap = SIMDVec16::Val(15);
+  SIMDVec16 tok = SIMDVec16::Load(tokens);
+  SIMDVec16 tok_index = tok.Min(token_cap).PrepareForU8Lookup();
+  SIMDVec16 huff_bits_pre = tok_index.U8Lookup(code.raw_bits_simd);
   // Set the highest bit when token == 16; the Huffman code is constructed in
   // such a way that the code for token 15 is the same as the code for 16,
   // except for the highest bit.
-  uint16x8_t huff_bits = vorrq_u16(
-      vandq_u16(vcgtq_u16(tok, tok_cap), vdupq_n_u16(128)), huff_bits_pre);
-  uint16x8_t huff_nbits =
-      vreinterpretq_u16_u8(vqtbl1q_u8(vld1q_u8(code.raw_nbits_simd), tokindex));
-  vst1q_u16(nbits_out, huff_nbits);
-  vst1q_u16(bits_out, huff_bits);
+  Mask16 needs_high_bit = tok.Eq(SIMDVec16::Val(16));
+  SIMDVec16 huff_bits = needs_high_bit.IfThenElse(
+      huff_bits_pre.Or(SIMDVec16::Val(128)), huff_bits_pre);
+  huff_bits.Store(bits_out);
+  tok_index.U8Lookup(code.raw_nbits_simd).Store(nbits_out);
 }
 
-FJXL_INLINE void HuffmanNeonAbove14(const uint16_t* tokens,
+FJXL_INLINE void HuffmanSIMDAbove14(const uint16_t* tokens,
                                     const PrefixCode& code, uint16_t* nbits_out,
                                     uint16_t* bits_out) {
-  uint16x8_t tok = vld1q_u16(tokens);
-
-  uint16x8_t above = vcgtq_u16(tok, vdupq_n_u16(12));
+  SIMDVec16 tok = SIMDVec16::Load(tokens);
+  // We assume `tok` fits in a *signed* 16-bit integer.
+  Mask16 above = tok.Gt(SIMDVec16::Val(12));
   // 13, 14 -> 13
   // 15, 16 -> 14
   // 17, 18 -> 15
-  uint16x8_t remap_tok =
-      vbslq_u16(above, vshrq_n_u16(vaddq_u16(tok, vdupq_n_u16(13)), 1), tok);
-
-  uint8x16_t tokindex =
-      vreinterpretq_u8_u16(vorrq_u16(remap_tok, vdupq_n_u16(0xFF00)));
-  uint16x8_t huff_bits_pre =
-      vreinterpretq_u16_u8(vqtbl1q_u8(vld1q_u8(code.raw_bits_simd), tokindex));
+  SIMDVec16 remap_tok = above.IfThenElse(tok.HAdd(SIMDVec16::Val(13)), tok);
+  SIMDVec16 tok_index = remap_tok.PrepareForU8Lookup();
+  SIMDVec16 huff_bits_pre = tok_index.U8Lookup(code.raw_bits_simd);
   // Set the highest bit when token == 14, 16, 18.
-  uint16x8_t needs_high_bit =
-      vandq_u16(above, vceqq_u16(tok, vandq_u16(tok, vdupq_n_u16(0xFFFE))));
-  uint16x8_t huff_bits =
-      vorrq_u16(vandq_u16(needs_high_bit, vdupq_n_u16(128)), huff_bits_pre);
-  uint16x8_t huff_nbits =
-      vreinterpretq_u16_u8(vqtbl1q_u8(vld1q_u8(code.raw_nbits_simd), tokindex));
-  vst1q_u16(nbits_out, huff_nbits);
-  vst1q_u16(bits_out, huff_bits);
+  Mask16 needs_high_bit = above.And(tok.Eq(tok.And(SIMDVec16::Val(0xFFFE))));
+  SIMDVec16 huff_bits = needs_high_bit.IfThenElse(
+      huff_bits_pre.Or(SIMDVec16::Val(128)), huff_bits_pre);
+  huff_bits.Store(bits_out);
+  tok_index.U8Lookup(code.raw_nbits_simd).Store(nbits_out);
 }
 
-FJXL_INLINE uint32x4_t Merge16To32Neon(uint16x8_t nbits, uint16x8_t bits,
-                                       uint32x4_t* nbits32) {
-  uint32x4_t nbits_lo16 =
-      vandq_u32(vreinterpretq_u32_u16(nbits), vdupq_n_u32(0xFFFF));
-  uint32x4_t bits_hi16 = vshlq_u32(vshrq_n_u32(vreinterpretq_u32_u16(bits), 16),
-                                   vreinterpretq_s32_u32(nbits_lo16));
-  uint32x4_t bits_lo16 =
-      vandq_u32(vreinterpretq_u32_u16(bits), vdupq_n_u32(0xFFFF));
-
-  *nbits32 = vsraq_n_u32(nbits_lo16, vreinterpretq_u32_u16(nbits), 16);
-  return vorrq_u32(bits_hi16, bits_lo16);
-}
-
-FJXL_INLINE void StoreNeonUpTo8(const uint16_t* nbits_tok,
+FJXL_INLINE void StoreSIMDUpTo8(const uint16_t* nbits_tok,
                                 const uint16_t* bits_tok,
                                 const uint16_t* nbits_huff,
-                                const uint16_t* bits_huff, BitWriter& out) {
-  uint16x8_t bits = vld1q_u16(bits_tok);
-  uint16x8_t nbits = vld1q_u16(nbits_tok);
-  uint16x8_t huff_bits = vld1q_u16(bits_huff);
-  uint16x8_t huff_nbits = vld1q_u16(nbits_huff);
-  bits =
-      vorrq_u16(vshlq_u16(bits, vreinterpretq_s16_u16(huff_nbits)), huff_bits);
-  nbits = vaddq_u16(nbits, huff_nbits);
-
-  uint32x4_t nbits32;
-  auto bits32 = Merge16To32Neon(nbits, bits, &nbits32);
-
-  // Merging up to 64 bits is not faster.
-  for (size_t i = 0; i < 4; i++) {
-    out.Write(nbits32[i], bits32[i]);
-  }
+                                const uint16_t* bits_huff, uint64_t* nbits_out,
+                                uint64_t* bits_out) {
+  Bits16 bits =
+      Bits16::FromRaw(SIMDVec16::Load(nbits_tok), SIMDVec16::Load(bits_tok));
+  Bits16 huff_bits =
+      Bits16::FromRaw(SIMDVec16::Load(nbits_huff), SIMDVec16::Load(bits_huff));
+  bits.Interleave(huff_bits);
+  bits.Merge().Merge().Store(nbits_out, bits_out);
 }
 
 // Huffman and raw bits don't necessarily fit in a single u16 here.
-FJXL_INLINE void StoreNeonUpTo14(const uint16_t* nbits_tok,
+FJXL_INLINE void StoreSIMDUpTo14(const uint16_t* nbits_tok,
                                  const uint16_t* bits_tok,
                                  const uint16_t* nbits_huff,
-                                 const uint16_t* bits_huff, BitWriter& out) {
-  uint16x8_t bits = vld1q_u16(bits_tok);
-  uint16x8_t nbits = vld1q_u16(nbits_tok);
-  uint16x8_t huff_bits = vld1q_u16(bits_huff);
-  uint16x8_t huff_nbits = vld1q_u16(nbits_huff);
+                                 const uint16_t* bits_huff, uint64_t* nbits_out,
+                                 uint64_t* bits_out) {
+  VecPair<SIMDVec16> bits =
+      SIMDVec16::Load(bits_tok).Interleave(SIMDVec16::Load(bits_huff));
+  VecPair<SIMDVec16> nbits =
+      SIMDVec16::Load(nbits_tok).Interleave(SIMDVec16::Load(nbits_huff));
+  Bits16 low = Bits16::FromRaw(nbits.low, bits.low);
+  Bits16 hi = Bits16::FromRaw(nbits.hi, bits.hi);
 
-  uint16x8_t lbits = vzip1q_u16(huff_bits, bits);
-  uint16x8_t hbits = vzip2q_u16(huff_bits, bits);
-  uint16x8_t lnbits = vzip1q_u16(huff_nbits, nbits);
-  uint16x8_t hnbits = vzip2q_u16(huff_nbits, nbits);
-
-  // Merging up to 64 bits is not faster.
-  uint32x4_t nbits32;
-  auto bits32 = Merge16To32Neon(lnbits, lbits, &nbits32);
-  for (size_t i = 0; i < 4; i++) {
-    out.Write(nbits32[i], bits32[i]);
-  }
-  bits32 = Merge16To32Neon(hnbits, hbits, &nbits32);
-  for (size_t i = 0; i < 4; i++) {
-    out.Write(nbits32[i], bits32[i]);
-  }
+  low.Merge().Merge().Store(nbits_out, bits_out);
+  hi.Merge().Merge().Store(nbits_out + Bits64::kLanes,
+                           bits_out + Bits64::kLanes);
 }
 
-FJXL_INLINE void StoreNeonAbove14(const uint32_t* nbits_tok,
+FJXL_INLINE void StoreSIMDAbove14(const uint32_t* nbits_tok,
                                   const uint32_t* bits_tok,
                                   const uint16_t* nbits_huff,
-                                  const uint16_t* bits_huff, BitWriter& out) {
-  uint32x4_t bits_lo = vld1q_u32(bits_tok);
-  uint32x4_t nbits_lo = vld1q_u32(nbits_tok);
-  uint32x4_t bits_hi = vld1q_u32(bits_tok + 4);
-  uint32x4_t nbits_hi = vld1q_u32(nbits_tok + 4);
-  uint16x8_t huff_bits = vld1q_u16(bits_huff);
-  uint16x8_t huff_nbits = vld1q_u16(nbits_huff);
-  uint32x4_t huff_nbits_lo = vmovl_u16(vget_low_u16(huff_nbits));
-  uint32x4_t huff_nbits_hi = vmovl_high_u16(huff_nbits);
-  uint32x4_t huff_bits_lo = vmovl_u16(vget_low_u16(huff_bits));
-  uint32x4_t huff_bits_hi = vmovl_high_u16(huff_bits);
-  bits_lo = vorrq_u32(vshlq_u32(bits_lo, vreinterpretq_s32_u32(huff_nbits_lo)),
-                      huff_bits_lo);
-  nbits_lo = vaddq_u32(nbits_lo, huff_nbits_lo);
+                                  const uint16_t* bits_huff,
+                                  uint64_t* nbits_out, uint64_t* bits_out) {
+  static_assert(SIMDVec16::kLanes == 2 * SIMDVec32::kLanes, "");
+  Bits32 bits_low =
+      Bits32::FromRaw(SIMDVec32::Load(nbits_tok), SIMDVec32::Load(bits_tok));
+  Bits32 bits_hi =
+      Bits32::FromRaw(SIMDVec32::Load(nbits_tok + SIMDVec32::kLanes),
+                      SIMDVec32::Load(bits_tok + SIMDVec32::kLanes));
 
-  // Merging up to 64 bits is not faster.
-  for (size_t i = 0; i < 4; i++) {
-    out.Write(nbits_lo[i], bits_lo[i]);
-  }
-  bits_hi = vorrq_u32(vshlq_u32(bits_hi, vreinterpretq_s32_u32(huff_nbits_hi)),
-                      huff_bits_hi);
-  nbits_hi = vaddq_u32(nbits_hi, huff_nbits_hi);
-  for (size_t i = 0; i < 4; i++) {
-    out.Write(nbits_hi[i], bits_hi[i]);
-  }
+  VecPair<SIMDVec32> huff_bits = SIMDVec16::Load(bits_huff).Upcast();
+  VecPair<SIMDVec32> huff_nbits = SIMDVec16::Load(nbits_huff).Upcast();
+
+  Bits32 huff_low = Bits32::FromRaw(huff_nbits.low, huff_bits.low);
+  Bits32 huff_hi = Bits32::FromRaw(huff_nbits.hi, huff_bits.hi);
+
+  bits_low.Interleave(huff_low);
+  bits_low.Merge().Store(nbits_out, bits_out);
+  bits_hi.Interleave(huff_hi);
+  bits_hi.Merge().Store(nbits_out + Bits64::kLanes, bits_out + Bits64::kLanes);
 }
 #endif
 
@@ -995,8 +1519,18 @@ void EncodeHybridUint000(uint32_t value, uint32_t* token, uint32_t* nbits,
   *bits = value ? value - (1 << n) : 0;
 }
 
-// NOTE: the encoding of lz77 lengths relies on the chunk size being 16.
-constexpr size_t kChunkSize = 16;
+#ifdef FJXL_AVX512
+constexpr static size_t kLogChunkSize = 5;
+#elif defined(FJXL_AVX2) || defined(FJXL_NEON)
+// Even if NEON only has 128-bit lanes, it is still significantly (~1.3x) faster
+// to process two vectors at a time.
+constexpr static size_t kLogChunkSize = 4;
+#else
+constexpr static size_t kLogChunkSize = 3;
+#endif
+
+constexpr static size_t kChunkSize = 1 << kLogChunkSize;
+constexpr size_t kLZ77MinLength = kChunkSize;
 
 template <typename Residual>
 void GenericEncodeChunk(const Residual* residuals, const PrefixCode& code,
@@ -1036,20 +1570,21 @@ struct UpTo8Bits {
 
   static void EncodeChunk(upixel_t* residuals, const PrefixCode& code,
                           BitWriter& output) {
-#ifdef FJXL_AVX2
-    EncodeChunkAVX2(residuals, code, output);
-    return;
-#elif defined(FJXL_NEON)
-    for (int i : {0, 8}) {
-      uint16_t bits[8];
-      uint16_t nbits[8];
-      uint16_t bits_huff[8];
-      uint16_t nbits_huff[8];
-      uint16_t token[8];
-      TokenizeNeon(residuals + i, token, nbits, bits);
-      HuffmanNeonUpTo13(token, code, nbits_huff, bits_huff);
-      StoreNeonUpTo8(nbits, bits, nbits_huff, bits_huff, output);
+#ifdef FJXL_GENERIC_SIMD
+    uint64_t nbits64[kChunkSize / 4];
+    uint64_t bits64[kChunkSize / 4];
+    uint16_t bits[SIMDVec16::kLanes];
+    uint16_t nbits[SIMDVec16::kLanes];
+    uint16_t bits_huff[SIMDVec16::kLanes];
+    uint16_t nbits_huff[SIMDVec16::kLanes];
+    uint16_t token[SIMDVec16::kLanes];
+    for (size_t i = 0; i < kChunkSize; i += SIMDVec16::kLanes) {
+      TokenizeSIMD(residuals + i, token, nbits, bits);
+      HuffmanSIMDUpTo13(token, code, nbits_huff, bits_huff);
+      StoreSIMDUpTo8(nbits, bits, nbits_huff, bits_huff, nbits64 + i / 4,
+                     bits64 + i / 4);
     }
+    output.WriteMultiple(nbits64, bits64, kChunkSize / 4);
     return;
 #endif
     GenericEncodeChunk(residuals, code, output);
@@ -1098,17 +1633,21 @@ struct From9To13Bits {
 
   static void EncodeChunk(upixel_t* residuals, const PrefixCode& code,
                           BitWriter& output) {
-#ifdef FJXL_NEON
-    for (int i : {0, 8}) {
-      uint16_t bits[8];
-      uint16_t nbits[8];
-      uint16_t bits_huff[8];
-      uint16_t nbits_huff[8];
-      uint16_t token[8];
-      TokenizeNeon(residuals + i, token, nbits, bits);
-      HuffmanNeonUpTo13(token, code, nbits_huff, bits_huff);
-      StoreNeonUpTo14(nbits, bits, nbits_huff, bits_huff, output);
+#ifdef FJXL_GENERIC_SIMD
+    uint64_t nbits64[kChunkSize / 2];
+    uint64_t bits64[kChunkSize / 2];
+    uint16_t bits[SIMDVec16::kLanes];
+    uint16_t nbits[SIMDVec16::kLanes];
+    uint16_t bits_huff[SIMDVec16::kLanes];
+    uint16_t nbits_huff[SIMDVec16::kLanes];
+    uint16_t token[SIMDVec16::kLanes];
+    for (size_t i = 0; i < kChunkSize; i += SIMDVec16::kLanes) {
+      TokenizeSIMD(residuals + i, token, nbits, bits);
+      HuffmanSIMDUpTo13(token, code, nbits_huff, bits_huff);
+      StoreSIMDUpTo14(nbits, bits, nbits_huff, bits_huff, nbits64 + i / 2,
+                      bits64 + i / 2);
     }
+    output.WriteMultiple(nbits64, bits64, kChunkSize / 2);
     return;
 #endif
     GenericEncodeChunk(residuals, code, output);
@@ -1161,17 +1700,21 @@ struct Exactly14Bits {
 
   static void EncodeChunk(upixel_t* residuals, const PrefixCode& code,
                           BitWriter& output) {
-#ifdef FJXL_NEON
-    for (int i : {0, 8}) {
-      uint16_t bits[8];
-      uint16_t nbits[8];
-      uint16_t bits_huff[8];
-      uint16_t nbits_huff[8];
-      uint16_t token[8];
-      TokenizeNeon(residuals + i, token, nbits, bits);
-      HuffmanNeon14(token, code, nbits_huff, bits_huff);
-      StoreNeonUpTo14(nbits, bits, nbits_huff, bits_huff, output);
+#ifdef FJXL_GENERIC_SIMD
+    uint64_t nbits64[kChunkSize / 2];
+    uint64_t bits64[kChunkSize / 2];
+    uint16_t bits[SIMDVec16::kLanes];
+    uint16_t nbits[SIMDVec16::kLanes];
+    uint16_t bits_huff[SIMDVec16::kLanes];
+    uint16_t nbits_huff[SIMDVec16::kLanes];
+    uint16_t token[SIMDVec16::kLanes];
+    for (size_t i = 0; i < kChunkSize; i += SIMDVec16::kLanes) {
+      TokenizeSIMD(residuals + i, token, nbits, bits);
+      HuffmanSIMD14(token, code, nbits_huff, bits_huff);
+      StoreSIMDUpTo14(nbits, bits, nbits_huff, bits_huff, nbits64 + i / 2,
+                      bits64 + i / 2);
     }
+    output.WriteMultiple(nbits64, bits64, kChunkSize / 2);
     return;
 #endif
     GenericEncodeChunk(residuals, code, output);
@@ -1222,17 +1765,21 @@ struct MoreThan14Bits {
 
   static void EncodeChunk(upixel_t* residuals, const PrefixCode& code,
                           BitWriter& output) {
-#ifdef FJXL_NEON
-    for (int i : {0, 8}) {
-      uint32_t bits[8];
-      uint32_t nbits[8];
-      uint16_t bits_huff[8];
-      uint16_t nbits_huff[8];
-      uint16_t token[8];
-      TokenizeNeon(residuals + i, token, nbits, bits);
-      HuffmanNeonAbove14(token, code, nbits_huff, bits_huff);
-      StoreNeonAbove14(nbits, bits, nbits_huff, bits_huff, output);
+#ifdef FJXL_GENERIC_SIMD
+    uint64_t nbits64[kChunkSize / 2];
+    uint64_t bits64[kChunkSize / 2];
+    uint32_t bits[SIMDVec16::kLanes];
+    uint32_t nbits[SIMDVec16::kLanes];
+    uint16_t bits_huff[SIMDVec16::kLanes];
+    uint16_t nbits_huff[SIMDVec16::kLanes];
+    uint16_t token[SIMDVec16::kLanes];
+    for (size_t i = 0; i < kChunkSize; i += SIMDVec16::kLanes) {
+      TokenizeSIMD(residuals + i, token, nbits, bits);
+      HuffmanSIMDAbove14(token, code, nbits_huff, bits_huff);
+      StoreSIMDAbove14(nbits, bits, nbits_huff, bits_huff, nbits64 + i / 2,
+                       bits64 + i / 2);
     }
+    output.WriteMultiple(nbits64, bits64, kChunkSize / 2);
     return;
 #endif
     GenericEncodeChunk(residuals, code, output);
@@ -1264,24 +1811,38 @@ void PrepareDCGlobalCommon(bool is_single_group, size_t width, size_t height,
   output->Write(1, 1);     // Enable lz77 for the main bitstream
   output->Write(2, 0b00);  // lz77 offset 224
   static_assert(kLZ77Offset == 224, "");
-  output->Write(10, 0b0000011111);  // lz77 min length 16
-  static_assert(kLZ77MinLength == 16, "");
-  output->Write(4, 4);  // 404 hybrid uint config for lz77: 4
-  output->Write(3, 0);  // 0
-  output->Write(3, 4);  // 4
-  output->Write(1, 1);  // simple code for the context map
-  output->Write(2, 1);  // two clusters
-  output->Write(1, 1);  // raw/lz77 length histogram last
-  output->Write(1, 0);  // distance histogram first
-  output->Write(1, 1);  // use prefix codes
+  if (kChunkSize == 16) {
+    output->Write(10, 0b0000011111);  // lz77 min length 16
+  } else if (kChunkSize == 8) {
+    output->Write(4, 0b1110);  // lz77 min length 8
+  } else {
+    assert(kChunkSize == 32);
+    output->Write(10, 0b0001011111);  // lz77 min length 32
+  }
+  // hybrid uint config for lz77
+  size_t hu_bits_sb = kChunkSize == 8 ? 2 : 3;
+  output->Write(4, kLogChunkSize);           // kLogChunkSize
+  output->Write(hu_bits_sb, 0);              // 0
+  output->Write(hu_bits_sb, kLogChunkSize);  // kLogChunkSize
+  output->Write(1, 1);                       // simple code for the context map
+  output->Write(2, 1);                       // two clusters
+  output->Write(1, 1);                       // raw/lz77 length histogram last
+  output->Write(1, 0);                       // distance histogram first
+  output->Write(1, 1);                       // use prefix codes
   output->Write(4, 0);  // 000 hybrid uint config for distances (only need 0)
   output->Write(4, 0);  // 000 hybrid uint config for symbols (only <= 10)
   // Distance alphabet size:
   output->Write(5, 0b00001);  // 2: just need 1 for RLE (i.e. distance 1)
   // Symbol + LZ77 alphabet size:
-  output->Write(1, 1);    // > 1
-  output->Write(4, 8);    // <= 512
-  output->Write(8, 255);  // == 512
+  if (kChunkSize < 32) {
+    output->Write(1, 1);    // > 1
+    output->Write(4, 8);    // <= 512
+    output->Write(8, 255);  // == 512
+  } else {
+    output->Write(1, 1);    // > 1
+    output->Write(4, 9);    // <= 1024
+    output->Write(9, 511);  // == 1024
+  }
 
   // Distance histogram:
   output->Write(2, 1);  // simple prefix code
@@ -1289,7 +1850,7 @@ void PrepareDCGlobalCommon(bool is_single_group, size_t width, size_t height,
   output->Write(1, 1);  // 1
 
   // Symbol + lz77 histogram:
-  code.WriteTo(output);
+  code.WriteTo(output, kChunkSize);
 
   // Group header for global modular image.
   output->Write(1, 1);  // Global tree
@@ -1313,13 +1874,13 @@ void PrepareDCGlobal(bool is_single_group, size_t width, size_t height,
   }
 }
 
-void EncodeHybridUint404_Mul16(uint32_t value, uint32_t* token_div16,
-                               uint32_t* nbits, uint32_t* bits) {
-  // NOTE: token in libjxl is actually << 4.
+void EncodeHybridUintLZ77(uint32_t value, uint32_t* token_div16,
+                          uint32_t* nbits, uint32_t* bits) {
+  // NOTE: token in libjxl is actually << kLogChunkSize.
   uint32_t n = CeilLog2(value);
-  *token_div16 = value < 16 ? 0 : n - 3;
-  *nbits = value < 16 ? 0 : n - 4;
-  *bits = value < 16 ? 0 : (value >> 4) - (1 << *nbits);
+  *token_div16 = value < kChunkSize ? 0 : n - kLogChunkSize + 1;
+  *nbits = value < kChunkSize ? 0 : n - kLogChunkSize;
+  *bits = value < kChunkSize ? 0 : (value >> kLogChunkSize) - (1 << *nbits);
 }
 
 template <typename BitDepth>
@@ -1329,7 +1890,7 @@ struct ChunkEncoder {
     if (count == 0) return;
     count -= kLZ77MinLength;
     unsigned token_div16, nbits, bits;
-    EncodeHybridUint404_Mul16(count, &token_div16, &nbits, &bits);
+    EncodeHybridUintLZ77(count, &token_div16, &nbits, &bits);
     output.Write(
         code.lz77_nbits[token_div16] + nbits,
         (bits << code.lz77_nbits[token_div16]) | code.lz77_bits[token_div16]);
@@ -1352,7 +1913,7 @@ struct ChunkSampleCollector {
     if (count == 0) return;
     count -= kLZ77MinLength;
     unsigned token_div16, nbits, bits;
-    EncodeHybridUint404_Mul16(count, &token_div16, &nbits, &bits);
+    EncodeHybridUintLZ77(count, &token_div16, &nbits, &bits);
     lz77_counts[token_div16]++;
   }
 
@@ -1386,7 +1947,7 @@ struct ChannelRowProcessor {
   void ProcessChunk(const pixel_t* row, const pixel_t* row_left,
                     const pixel_t* row_top, const pixel_t* row_topleft) {
     bool continue_rle = true;
-    alignas(32) upixel_t residuals[kChunkSize] = {};
+    alignas(64) upixel_t residuals[kChunkSize] = {};
     for (size_t ix = 0; ix < kChunkSize; ix++) {
       pixel_t px = row[ix];
       pixel_t left = row_left[ix];
@@ -1900,10 +2461,18 @@ JxlFastLosslessFrameState* LLEnc(const unsigned char* rgba, size_t width,
   for (size_t i = bitdepth.NumSymbols(doing_ycocg); i < kNumRawSymbols; i++) {
     base_raw_counts[i] = 0;
   }
-  uint64_t base_lz77_counts[17] = {
-      // short runs will be sampled, but long ones won't.
-      // near full-group run is quite common (e.g. all-opaque alpha)
+  // short runs will be sampled, but long ones won't.
+  // near full-group run is quite common (e.g. all-opaque alpha)
+  uint64_t base_lz77_counts_c32[PrefixCode::kNumLZ77] = {
+      12, 9, 11, 15, 2, 2, 1, 1, 1, 1, 2, 300, 0, 0, 0, 0, 0};
+  uint64_t base_lz77_counts_c16[PrefixCode::kNumLZ77] = {
       18, 12, 9, 11, 15, 2, 2, 1, 1, 1, 1, 2, 300, 0, 0, 0, 0};
+  uint64_t base_lz77_counts_c8[PrefixCode::kNumLZ77] = {
+      32, 18, 12, 9, 11, 15, 2, 2, 1, 1, 1, 1, 2, 300, 0, 0, 0};
+
+  uint64_t* base_lz77_counts = kChunkSize == 8    ? base_lz77_counts_c8
+                               : kChunkSize == 16 ? base_lz77_counts_c16
+                                                  : base_lz77_counts_c32;
 
   for (size_t i = 0; i < kNumRawSymbols; i++) {
     raw_counts[i] = (raw_counts[i] << 8) + base_raw_counts[i];
@@ -1923,7 +2492,7 @@ JxlFastLosslessFrameState* LLEnc(const unsigned char* rgba, size_t width,
     lz77_counts[i] = (lz77_counts[i] << 8) + base_lz77_counts[i];
   }
 
-  alignas(32) PrefixCode hcode(bitdepth, raw_counts, lz77_counts);
+  alignas(64) PrefixCode hcode(bitdepth, raw_counts, lz77_counts);
 
   bool onegroup = num_groups_x == 1 && num_groups_y == 1;
 
@@ -2025,6 +2594,13 @@ JxlFastLosslessFrameState* JxlFastLosslessEncodeImpl(
 
 #endif  // FJXL_SELF_INCLUDE
 
+// The gains from AVX512 seem marginal (at least on a i7-11850H) and come at the
+// cost of a significant increase in compilation time. Disable AVX512 by
+// default.
+#ifndef FJXL_ENABLE_AVX512
+#define FJXL_ENABLE_AVX512 0
+#endif
+
 #ifndef FJXL_SELF_INCLUDE
 
 #define FJXL_SELF_INCLUDE
@@ -2033,6 +2609,7 @@ JxlFastLosslessFrameState* JxlFastLosslessEncodeImpl(
 
 #define FJXL_NEON
 #include "lib/jxl/enc_fast_lossless.cc"
+#undef FJXL_NEON
 
 #elif defined(__x86_64__) || defined(_M_X64)
 
@@ -2049,6 +2626,7 @@ JxlFastLosslessFrameState* JxlFastLosslessEncodeImpl(
 namespace AVX2 {
 #define FJXL_AVX2
 #include "lib/jxl/enc_fast_lossless.cc"
+#undef FJXL_AVX2
 }  // namespace AVX2
 
 #ifdef __clang__
@@ -2056,6 +2634,29 @@ namespace AVX2 {
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
+
+#if FJXL_ENABLE_AVX512
+#ifdef __clang__
+#pragma clang attribute push(                                      \
+    __attribute__((target("avx512cd,avx512bw,avx512vl,avx512f"))), \
+    apply_to = function)
+#elif defined(__GNUC__)
+#pragma GCC push_options
+#pragma GCC target "avx512cd,avx512bw,avx512vl,avx512f"
+#endif
+
+namespace AVX512 {
+#define FJXL_AVX512
+#include "lib/jxl/enc_fast_lossless.cc"
+#undef FJXL_AVX512
+}  // namespace AVX512
+
+#ifdef __clang__
+#pragma clang attribute pop
+#elif defined(__GNUC__)
+#pragma GCC pop_options
+#endif
+#endif  // FJXL_ENABLE_AVX512
 
 #else
 #include "lib/jxl/enc_fast_lossless.cc"
@@ -2101,6 +2702,15 @@ JxlFastLosslessFrameState* JxlFastLosslessPrepareFrame(
 
   // TODO(veluca): MSVC dynamic dispatch.
 #if (!defined(_MSC_VER) || defined(__clang__)) && defined(__x86_64__)
+#if FJXL_ENABLE_AVX512
+  if (__builtin_cpu_supports("avx512cd") &&
+      __builtin_cpu_supports("avx512bw") && __builtin_cpu_supports("avx512f") &&
+      __builtin_cpu_supports("avx512vl")) {
+    return AVX512::JxlFastLosslessEncodeImpl(rgba, width, row_stride, height,
+                                             nb_chans, bitdepth, big_endian,
+                                             effort, runner_opaque, runner);
+  }
+#endif
   if (__builtin_cpu_supports("avx2")) {
     return AVX2::JxlFastLosslessEncodeImpl(rgba, width, row_stride, height,
                                            nb_chans, bitdepth, big_endian,
