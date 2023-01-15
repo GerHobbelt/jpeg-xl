@@ -3,20 +3,17 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-#include "fast_lossless.h"
+#include "lib/jxl/enc_fast_lossless.h"
 #include "lib/jxl/base/byte_order.h"
 
 #include <assert.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <string.h>
 
 #include <algorithm>
 #include <array>
-#include <cstdint>
 #include <limits>
 #include <memory>
-#include <queue>
 #include <vector>
 
 #if (!defined(__BYTE_ORDER__) || (__BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__))

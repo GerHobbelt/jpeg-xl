@@ -12,7 +12,7 @@
 
 #ifdef HAVE_LODEPNG
 
-#include "fast_lossless.h"
+#include "lib/jxl/enc_fast_lossless.h"
 #include "pam-input.h"
 
 #include "monolithic_examples.h"

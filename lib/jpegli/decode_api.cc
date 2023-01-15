@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <jpeglib.h>
+#include <string.h>
 /* clang-format on */
 
 #include <vector>
@@ -21,14 +22,6 @@
 #include "lib/jxl/base/status.h"
 
 namespace jpegli {
-
-enum DecodeState {
-  kStart,
-  kInHeader,
-  kHeaderDone,
-  kProcessMarkers,
-  kProcessScan,
-};
 
 void InitializeImage(j_decompress_ptr cinfo) {
   cinfo->jpeg_color_space = JCS_UNKNOWN;
@@ -108,6 +101,8 @@ void jpeg_CreateDecompress(j_decompress_ptr cinfo, int version,
   cinfo->master = new jpeg_decomp_master;
   cinfo->mem =
       reinterpret_cast<struct jpeg_memory_mgr*>(new jpegli::MemoryManager);
+  cinfo->is_decompressor = TRUE;
+  cinfo->src = nullptr;
   cinfo->marker_list = nullptr;
   cinfo->input_scan_number = 0;
   cinfo->quantize_colors = FALSE;
@@ -117,23 +112,49 @@ void jpeg_CreateDecompress(j_decompress_ptr cinfo, int version,
   cinfo->buffered_image = FALSE;
   cinfo->raw_data_out = FALSE;
   cinfo->output_scanline = 0;
+  for (int i = 0; i < 16; ++i) {
+    cinfo->master->app_marker_parsers[i] = nullptr;
+  }
+  cinfo->master->com_marker_parser = nullptr;
 }
 
 void jpeg_destroy_decompress(j_decompress_ptr cinfo) {
-  auto mem = reinterpret_cast<jpegli::MemoryManager*>(cinfo->mem);
-  for (void* ptr : mem->owned_ptrs) {
-    free(ptr);
-  }
-  delete mem;
-  delete cinfo->master;
+  jpeg_destroy(reinterpret_cast<j_common_ptr>(cinfo));
 }
 
-void jpeg_abort_decompress(j_decompress_ptr cinfo) {}
+void jpeg_abort_decompress(j_decompress_ptr cinfo) {
+  jpeg_abort(reinterpret_cast<j_common_ptr>(cinfo));
+}
 
 void jpeg_save_markers(j_decompress_ptr cinfo, int marker_code,
                        unsigned int length_limit) {
   jpeg_decomp_master* m = cinfo->master;
   m->markers_to_save_.insert(marker_code);
+}
+
+void jpeg_set_marker_processor(j_decompress_ptr cinfo, int marker_code,
+                               jpeg_marker_parser_method routine) {
+  jpeg_decomp_master* m = cinfo->master;
+  if (marker_code == 0xfe) {
+    m->com_marker_parser = routine;
+  } else if (marker_code >= 0xe0 && marker_code <= 0xef) {
+    m->app_marker_parsers[marker_code - 0xe0] = routine;
+  } else {
+    JPEGLI_ERROR("jpeg_set_marker_processor: invalid marker code %d",
+                 marker_code);
+  }
+}
+
+void jpeg_new_colormap(j_decompress_ptr cinfo) {
+  // TODO(szabadka) Implement this together with 2-pass quantization using
+  // external color map.
+  JPEGLI_ERROR("Color quantization is not implemented.");
+}
+
+boolean jpeg_resync_to_restart(j_decompress_ptr cinfo, int desired) {
+  // The default resync_to_restart will just throw an error.
+  JPEGLI_ERROR("Invalid restart marker found.");
+  return TRUE;
 }
 
 int jpeg_consume_input(j_decompress_ptr cinfo) {
@@ -173,6 +194,31 @@ int jpeg_read_header(j_decompress_ptr cinfo, boolean require_image) {
     }
   };
   return JPEG_HEADER_OK;
+}
+
+boolean jpeg_read_icc_profile(j_decompress_ptr cinfo, JOCTET** icc_data_ptr,
+                              unsigned int* icc_data_len) {
+  if (cinfo->global_state == jpegli::kStart ||
+      cinfo->global_state == jpegli::kInHeader) {
+    JPEGLI_ERROR("jpeg_read_icc_profile: unexpected state %d",
+                 cinfo->global_state);
+  }
+  if (icc_data_ptr == nullptr || icc_data_len == nullptr) {
+    JPEGLI_ERROR("jpeg_read_icc_profile: invalid output buffer");
+  }
+  jpeg_decomp_master* m = cinfo->master;
+  if (m->icc_profile_.empty()) {
+    *icc_data_ptr = nullptr;
+    *icc_data_len = 0;
+    return FALSE;
+  }
+  *icc_data_len = m->icc_profile_.size();
+  *icc_data_ptr = (JOCTET*)malloc(*icc_data_len);
+  if (*icc_data_ptr == nullptr) {
+    JPEGLI_ERROR("jpeg_read_icc_profile: Out of memory");
+  }
+  memcpy(*icc_data_ptr, m->icc_profile_.data(), *icc_data_len);
+  return TRUE;
 }
 
 void jpeg_calc_output_dimensions(j_decompress_ptr cinfo) {
@@ -351,6 +397,11 @@ JDIMENSION jpeg_read_raw_data(j_decompress_ptr cinfo, JSAMPIMAGE data,
   return 0;
 }
 
+jvirt_barray_ptr* jpeg_read_coefficients(j_decompress_ptr cinfo) {
+  JPEGLI_ERROR("Raw coefficient data mode is not implemented.");
+  return nullptr;
+}
+
 boolean jpeg_finish_decompress(j_decompress_ptr cinfo) {
   if (cinfo->global_state != jpegli::kProcessScan &&
       cinfo->global_state != jpegli::kProcessMarkers) {
@@ -363,5 +414,6 @@ boolean jpeg_finish_decompress(j_decompress_ptr cinfo) {
       return FALSE;
     }
   }
+  jpeg_abort_decompress(cinfo);
   return TRUE;
 }
