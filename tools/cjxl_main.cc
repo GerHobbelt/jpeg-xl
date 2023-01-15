@@ -651,6 +651,8 @@ void SetDistanceFromFlags(CommandLineParser* cmdline, CompressArgs* args,
     bool lossy_input = (codec == jxl::extras::Codec::kJPG ||
                         codec == jxl::extras::Codec::kGIF);
     args->distance = lossy_input ? 0.0 : 1.0;
+  } else if (args->distance > 0) {
+    args->lossless_jpeg = 0;
   }
   params->distance = args->distance;
 }
@@ -947,6 +949,7 @@ int main(int argc, const char** argv) {
   std::vector<uint8_t> image_data;
   jxl::extras::PackedPixelFile ppf;
   jxl::extras::Codec codec = jxl::extras::Codec::kUnknown;
+  std::vector<uint8_t>* jpeg_bytes = nullptr;
   double decode_mps = 0;
   size_t pixels = 0;
   if (!jpegxl::tools::ReadFile(args.file_in, &image_data)) {
@@ -954,6 +957,8 @@ int main(int argc, const char** argv) {
     exit(EXIT_FAILURE);
   }
   if (!jpegxl::tools::IsJPG(image_data)) args.lossless_jpeg = 0;
+  jxl::extras::JXLCompressParams params;
+  ProcessFlags(codec, ppf, jpeg_bytes, &cmdline, &args, &params);
   if (!args.lossless_jpeg) {
     const double t0 = jxl::Now();
     jxl::Status status =
@@ -971,7 +976,6 @@ int main(int argc, const char** argv) {
     pixels = ppf.info.xsize * ppf.info.ysize;
     decode_mps = pixels * ppf.info.num_color_channels * 1E-6 / (t1 - t0);
   }
-  std::vector<uint8_t>* jpeg_bytes = nullptr;
   if (args.lossless_jpeg && jpegxl::tools::IsJPG(image_data)) {
     if (!cmdline.GetOption(args.opt_lossless_jpeg_id)->matched()) {
       std::cerr << "Note: Implicit-default for JPEG is lossless-transcoding. "
@@ -981,7 +985,6 @@ int main(int argc, const char** argv) {
     jpeg_bytes = &image_data;
   }
 
-  jxl::extras::JXLCompressParams params;
   ProcessFlags(codec, ppf, jpeg_bytes, &cmdline, &args, &params);
 
   if (!ppf.metadata.exif.empty() || !ppf.metadata.xmp.empty() ||

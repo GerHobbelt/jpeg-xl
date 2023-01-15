@@ -18,8 +18,6 @@ namespace jpegli {
 namespace {
 
 constexpr int kMaxSampling = 2;
-constexpr int kMaxHuffmanTables = 4;
-constexpr int kMaxQuantTables = 4;
 constexpr int kMaxDimPixels = 65535;
 constexpr uint8_t kIccProfileTag[12] = "ICC_PROFILE";
 
@@ -67,11 +65,11 @@ void ProcessSOF(j_decompress_ptr cinfo, const uint8_t* data, size_t len) {
   cinfo->arith_code = 0;
   size_t pos = 4;
   JPEG_VERIFY_LEN(6);
-  int precision = ReadUint8(data, &pos);
+  cinfo->data_precision = ReadUint8(data, &pos);
   cinfo->image_height = ReadUint16(data, &pos);
   cinfo->image_width = ReadUint16(data, &pos);
   cinfo->num_components = ReadUint8(data, &pos);
-  JPEG_VERIFY_INPUT(precision, 8, 8);
+  JPEG_VERIFY_INPUT(cinfo->data_precision, 8, 8);
   JPEG_VERIFY_INPUT(cinfo->image_height, 1, kMaxDimPixels);
   JPEG_VERIFY_INPUT(cinfo->image_width, 1, kMaxDimPixels);
   JPEG_VERIFY_INPUT(cinfo->num_components, 1, kMaxComponents);
@@ -105,15 +103,8 @@ void ProcessSOF(j_decompress_ptr cinfo, const uint8_t* data, size_t len) {
     cinfo->max_v_samp_factor =
         std::max(cinfo->max_v_samp_factor, v_samp_factor);
     uint8_t quant_tbl_idx = ReadUint8(data, &pos);
-    bool found_quant_tbl = false;
-    for (size_t j = 0; j < m->quant_.size(); ++j) {
-      if (m->quant_[j].index == quant_tbl_idx) {
-        comp->quant_tbl_no = j;
-        found_quant_tbl = true;
-        break;
-      }
-    }
-    if (!found_quant_tbl) {
+    comp->quant_table = cinfo->quant_tbl_ptrs[quant_tbl_idx];
+    if (comp->quant_table == nullptr) {
       JPEGLI_ERROR("Quantization table with index %u not found", quant_tbl_idx);
     }
   }
@@ -187,6 +178,7 @@ void ProcessSOS(j_decompress_ptr cinfo, const uint8_t* data, size_t len) {
   JPEG_VERIFY_LEN(2 * cinfo->comps_in_scan);
   bool is_interleaved = (cinfo->comps_in_scan > 1);
   std::vector<bool> ids_seen(256, false);
+  cinfo->blocks_in_MCU = 0;
   for (int i = 0; i < cinfo->comps_in_scan; ++i) {
     int id = ReadUint8(data, &pos);
     if (ids_seen[id]) {  // (cf. section B.2.3, regarding CSj)
@@ -212,6 +204,12 @@ void ProcessSOS(j_decompress_ptr cinfo, const uint8_t* data, size_t len) {
     comp->MCU_width = is_interleaved ? comp->h_samp_factor : 1;
     comp->MCU_height = is_interleaved ? comp->v_samp_factor : 1;
     comp->MCU_blocks = comp->MCU_width * comp->MCU_height;
+    if (cinfo->blocks_in_MCU + comp->MCU_blocks > D_MAX_BLOCKS_IN_MCU) {
+      JPEGLI_ERROR("Too many blocks in MCU.");
+    }
+    for (int j = 0; j < comp->MCU_blocks; ++j) {
+      cinfo->MCU_membership[cinfo->blocks_in_MCU++] = i;
+    }
   }
   JPEG_VERIFY_LEN(3);
   cinfo->Ss = ReadUint8(data, &pos);
@@ -295,11 +293,7 @@ void ProcessSOS(j_decompress_ptr cinfo, const uint8_t* data, size_t len) {
   m->scan_mcu_row_ = 0;
   m->scan_mcu_col_ = 0;
   m->codestream_bits_ahead_ = 0;
-  size_t mcu_size = 0;
-  for (int i = 0; i < cinfo->comps_in_scan; ++i) {
-    mcu_size += cinfo->cur_comp_info[i]->MCU_blocks;
-  }
-  m->mcu_.coeffs.resize(mcu_size * DCTSIZE2);
+  m->mcu_.coeffs.resize(cinfo->blocks_in_MCU * DCTSIZE2);
   ++cinfo->input_scan_number;
   cinfo->input_iMCU_row = 0;
 }
@@ -309,7 +303,7 @@ void ProcessSOS(j_decompress_ptr cinfo, const uint8_t* data, size_t len) {
 // and solt_id of Huffman code being read.
 void ProcessDHT(j_decompress_ptr cinfo, const uint8_t* data, size_t len) {
   jpeg_decomp_master* m = cinfo->master;
-  constexpr int kLutSize = kMaxHuffmanTables * kJpegHuffmanLutSize;
+  constexpr int kLutSize = NUM_HUFF_TBLS * kJpegHuffmanLutSize;
   m->dc_huff_lut_.resize(kLutSize);
   m->ac_huff_lut_.resize(kLutSize);
   size_t pos = 4;
@@ -325,15 +319,21 @@ void ProcessDHT(j_decompress_ptr cinfo, const uint8_t* data, size_t len) {
     int huffman_index = slot_id;
     int is_ac_table = (slot_id & 0x10) != 0;
     HuffmanTableEntry* huff_lut;
+    JHUFF_TBL** table;
     if (is_ac_table) {
       huffman_index -= 0x10;
-      JPEG_VERIFY_INPUT(huffman_index, 0, 3);
+      JPEG_VERIFY_INPUT(huffman_index, 0, NUM_HUFF_TBLS - 1);
       huff_lut = &m->ac_huff_lut_[huffman_index * kJpegHuffmanLutSize];
+      table = &cinfo->ac_huff_tbl_ptrs[huffman_index];
     } else {
-      JPEG_VERIFY_INPUT(huffman_index, 0, 3);
+      JPEG_VERIFY_INPUT(huffman_index, 0, NUM_HUFF_TBLS - 1);
       huff_lut = &m->dc_huff_lut_[huffman_index * kJpegHuffmanLutSize];
+      table = &cinfo->dc_huff_tbl_ptrs[huffman_index];
     }
-    // Bit length histogram->
+    if (*table == nullptr) {
+      *table = jpeg_alloc_huff_table(reinterpret_cast<j_common_ptr>(cinfo));
+    }
+    // Bit length histogram
     std::array<uint32_t, kJpegHuffmanMaxBitLength + 1> counts = {};
     counts[0] = 0;
     int total_count = 0;
@@ -345,6 +345,7 @@ void ProcessDHT(j_decompress_ptr cinfo, const uint8_t* data, size_t len) {
         max_depth = i;
       }
       counts[i] = count;
+      (*table)->bits[i] = count;
       total_count += count;
       space -= count * (1 << (kJpegHuffmanMaxBitLength - i));
     }
@@ -367,13 +368,17 @@ void ProcessDHT(j_decompress_ptr cinfo, const uint8_t* data, size_t len) {
       }
       values_seen[value] = true;
       values[i] = value;
+      (*table)->huffval[i] = value;
+    }
+    for (int i = total_count; i < kJpegHuffmanAlphabetSize; ++i) {
+      (*table)->huffval[i] = 0;
     }
     // Add an invalid symbol that will have the all 1 code.
     ++counts[max_depth];
     values[total_count] = kJpegHuffmanAlphabetSize;
     space -= (1 << (kJpegHuffmanMaxBitLength - max_depth));
     if (space < 0) {
-      return JPEGLI_ERROR("Invalid Huffman code lengths.");
+      JPEGLI_ERROR("Invalid Huffman code lengths.");
     } else if (space > 0 && huff_lut[0].value != 0xffff) {
       // Re-initialize the values to an invalid symbol so that we can recognize
       // it when reading the bit stream using a Huffman code with space > 0.
@@ -389,27 +394,34 @@ void ProcessDHT(j_decompress_ptr cinfo, const uint8_t* data, size_t len) {
 
 void ProcessDQT(j_decompress_ptr cinfo, const uint8_t* data, size_t len) {
   jpeg_decomp_master* m = cinfo->master;
+  if (m->found_sof_) {
+    JPEGLI_ERROR("Updating quant tables between scans is not supported.");
+  }
   size_t pos = 4;
   if (pos == len) {
     return JPEGLI_ERROR("DQT marker: no quantization table found");
   }
-  while (pos < len && m->quant_.size() < kMaxQuantTables) {
+  while (pos < len) {
     JPEG_VERIFY_LEN(1);
     int quant_table_index = ReadUint8(data, &pos);
     int precision = quant_table_index >> 4;
     JPEG_VERIFY_INPUT(precision, 0, 1);
     quant_table_index &= 0xf;
-    JPEG_VERIFY_INPUT(quant_table_index, 0, 3);
+    JPEG_VERIFY_INPUT(quant_table_index, 0, NUM_QUANT_TBLS - 1);
     JPEG_VERIFY_LEN((precision + 1) * DCTSIZE2);
-    JPEGQuantTable table;
-    table.index = quant_table_index;
+
+    if (cinfo->quant_tbl_ptrs[quant_table_index] == nullptr) {
+      cinfo->quant_tbl_ptrs[quant_table_index] =
+          jpeg_alloc_quant_table(reinterpret_cast<j_common_ptr>(cinfo));
+    }
+    JQUANT_TBL* quant_table = cinfo->quant_tbl_ptrs[quant_table_index];
+
     for (size_t i = 0; i < DCTSIZE2; ++i) {
       int quant_val =
           precision ? ReadUint16(data, &pos) : ReadUint8(data, &pos);
       JPEG_VERIFY_INPUT(quant_val, 1, 65535);
-      table.values[kJPEGNaturalOrder[i]] = quant_val;
+      quant_table->quantval[kJPEGNaturalOrder[i]] = quant_val;
     }
-    m->quant_.push_back(table);
   }
   JPEG_VERIFY_MARKER_END();
 }
