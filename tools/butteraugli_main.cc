@@ -44,6 +44,7 @@ static Status WriteImage(Image3F&& image, const std::string& filename) {
 
 static Status RunButteraugli(const char* pathname1, const char* pathname2,
                       const std::string& distmap_filename,
+                      const std::string& raw_distmap_filename,
                       const std::string& colorspace_hint, double p,
                       float intensity_target) {
   extras::ColorHints color_hints;
@@ -93,6 +94,16 @@ static Status RunButteraugli(const char* pathname1, const char* pathname2,
     JXL_CHECK(
         WriteImage(CreateHeatMapImage(distmap, good, bad), distmap_filename));
   }
+  if (!raw_distmap_filename.empty()) {
+    FILE* out = fopen(raw_distmap_filename.c_str(), "w");
+    JXL_CHECK(out != nullptr);
+    fprintf(out, "Pf\n%" PRIuS " %" PRIuS "\n-1.0\n", distmap.xsize(),
+            distmap.ysize());
+    for (size_t y = distmap.ysize(); y-- > 0;) {
+      fwrite(distmap.Row(y), 4, distmap.xsize(), out);
+    }
+    fclose(out);
+  }
   return true;
 }
 
@@ -114,6 +125,7 @@ int main(int argc, const char** argv) {
     fprintf(stderr,
             "Usage: %s <reference> <distorted>\n"
             "  [--distmap <distmap>]\n"
+            "  [--rawdistmap <distmap.pfm>]\n"
             "  [--intensity_target <intensity_target>]\n"
             "  [--colorspace <colorspace_hint>]\n"
             "  [--pnorm <pth norm>]\n"
@@ -126,12 +138,15 @@ int main(int argc, const char** argv) {
     return 1;
   }
   std::string distmap;
+  std::string raw_distmap;
   std::string colorspace;
   double p = 3;
   float intensity_target = 80.0;  // sRGB intensity target.
   for (int i = 3; i < argc; i++) {
     if (std::string(argv[i]) == "--distmap" && i + 1 < argc) {
       distmap = argv[++i];
+    } else if (std::string(argv[i]) == "--rawdistmap" && i + 1 < argc) {
+      raw_distmap = argv[++i];
     } else if (std::string(argv[i]) == "--colorspace" && i + 1 < argc) {
       colorspace = argv[++i];
     } else if (std::string(argv[i]) == "--intensity_target" && i + 1 < argc) {
@@ -149,8 +164,8 @@ int main(int argc, const char** argv) {
     }
   }
 
-  return jxl::RunButteraugli(argv[1], argv[2], distmap, colorspace, p,
-                             intensity_target)
+  return jxl::RunButteraugli(argv[1], argv[2], distmap, raw_distmap, colorspace,
+                             p, intensity_target)
              ? 0
              : 1;
 }
