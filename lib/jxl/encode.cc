@@ -1005,6 +1005,7 @@ JxlEncoderStatus JxlEncoderFrameSettingsSetOption(
     case JXL_ENC_FRAME_SETTING_QPROGRESSIVE_AC:
     case JXL_ENC_FRAME_SETTING_LOSSY_PALETTE:
     case JXL_ENC_FRAME_SETTING_JPEG_RECON_CFL:
+    case JXL_ENC_FRAME_SETTING_JPEG_COMPRESS_BOXES:
       if (value < -1 || value > 1) {
         return JXL_API_ERROR(
             frame_settings->enc, JXL_ENC_ERR_API_USAGE,
@@ -1219,6 +1220,9 @@ JxlEncoderStatus JxlEncoderFrameSettingsSetOption(
       return JXL_API_ERROR(frame_settings->enc, JXL_ENC_ERR_NOT_SUPPORTED,
                            "Float option, try setting it with "
                            "JxlEncoderFrameSettingsSetFloatOption");
+    case JXL_ENC_FRAME_SETTING_JPEG_COMPRESS_BOXES:
+      frame_settings->values.cparams.jpeg_compress_boxes = value;
+      return JXL_ENC_SUCCESS;
     default:
       return JXL_API_ERROR(frame_settings->enc, JXL_ENC_ERR_NOT_SUPPORTED,
                            "Unknown option");
@@ -1307,6 +1311,7 @@ JxlEncoderStatus JxlEncoderFrameSettingsSetFloatOption(
     case JXL_ENC_FRAME_INDEX_BOX:
     case JXL_ENC_FRAME_SETTING_BROTLI_EFFORT:
     case JXL_ENC_FRAME_SETTING_FILL_ENUM:
+    case JXL_ENC_FRAME_SETTING_JPEG_COMPRESS_BOXES:
       return JXL_API_ERROR(frame_settings->enc, JXL_ENC_ERR_NOT_SUPPORTED,
                            "Int option, try setting it with "
                            "JxlEncoderFrameSettingsSetOption");
@@ -1507,17 +1512,19 @@ JxlEncoderStatus JxlEncoderAddJPEGFrame(
     memcpy(exif.data() + 4, io.blobs.exif.data(), io.blobs.exif.size());
     JxlEncoderUseBoxes(frame_settings->enc);
     JxlEncoderAddBox(frame_settings->enc, "Exif", exif.data(), exif_size,
-                     /*compress_box=*/JXL_TRUE);
+                     frame_settings->values.cparams.jpeg_compress_boxes);
   }
   if (!io.blobs.xmp.empty()) {
     JxlEncoderUseBoxes(frame_settings->enc);
     JxlEncoderAddBox(frame_settings->enc, "xml ", io.blobs.xmp.data(),
-                     io.blobs.xmp.size(), /*compress_box=*/JXL_TRUE);
+                     io.blobs.xmp.size(),
+                     frame_settings->values.cparams.jpeg_compress_boxes);
   }
   if (!io.blobs.jumbf.empty()) {
     JxlEncoderUseBoxes(frame_settings->enc);
     JxlEncoderAddBox(frame_settings->enc, "jumb", io.blobs.jumbf.data(),
-                     io.blobs.jumbf.size(), /*compress_box=*/JXL_TRUE);
+                     io.blobs.jumbf.size(),
+                     frame_settings->values.cparams.jpeg_compress_boxes);
   }
   if (frame_settings->enc->store_jpeg_metadata) {
     jxl::jpeg::JPEGData data_in = *io.Main().jpeg_data;
