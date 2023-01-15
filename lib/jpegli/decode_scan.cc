@@ -340,14 +340,14 @@ void SaveMCUCodingState(j_decompress_ptr cinfo) {
   memcpy(m->mcu_.last_dc_coeff, m->last_dc_coeff_, sizeof(m->last_dc_coeff_));
   m->mcu_.eobrun = m->eobrun_;
   size_t offset = 0;
-  for (size_t i = 0; i < m->scan_info_.num_components; ++i) {
-    JPEGComponentScanInfo* si = &m->scan_info_.components[i];
-    JPEGComponent* c = &m->components_[si->comp_idx];
-    int block_x = m->scan_mcu_col_ * si->mcu_xsize_blocks;
-    for (uint32_t iy = 0; iy < si->mcu_ysize_blocks; ++iy) {
-      int block_y = m->scan_mcu_row_ * si->mcu_ysize_blocks + iy;
-      size_t ncoeffs = si->mcu_xsize_blocks * DCTSIZE2;
-      int block_idx = (block_y * c->width_in_blocks + block_x) * DCTSIZE2;
+  for (int i = 0; i < cinfo->comps_in_scan; ++i) {
+    const jpeg_component_info* comp = cinfo->cur_comp_info[i];
+    JPEGComponent* c = &m->components_[comp->component_index];
+    int block_x = m->scan_mcu_col_ * comp->MCU_width;
+    for (int iy = 0; iy < comp->MCU_height; ++iy) {
+      int block_y = m->scan_mcu_row_ * comp->MCU_height + iy;
+      size_t ncoeffs = comp->MCU_width * DCTSIZE2;
+      int block_idx = (block_y * comp->width_in_blocks + block_x) * DCTSIZE2;
       coeff_t* coeffs = &c->coeffs[block_idx];
       memcpy(&m->mcu_.coeffs[offset], coeffs, ncoeffs * sizeof(coeffs[0]));
       offset += ncoeffs;
@@ -360,14 +360,14 @@ void RestoreMCUCodingState(j_decompress_ptr cinfo) {
   memcpy(m->last_dc_coeff_, m->mcu_.last_dc_coeff, sizeof(m->last_dc_coeff_));
   m->eobrun_ = m->mcu_.eobrun;
   size_t offset = 0;
-  for (size_t i = 0; i < m->scan_info_.num_components; ++i) {
-    JPEGComponentScanInfo* si = &m->scan_info_.components[i];
-    JPEGComponent* c = &m->components_[si->comp_idx];
-    int block_x = m->scan_mcu_col_ * si->mcu_xsize_blocks;
-    for (uint32_t iy = 0; iy < si->mcu_ysize_blocks; ++iy) {
-      int block_y = m->scan_mcu_row_ * si->mcu_ysize_blocks + iy;
-      size_t ncoeffs = si->mcu_xsize_blocks * DCTSIZE2;
-      int block_idx = (block_y * c->width_in_blocks + block_x) * DCTSIZE2;
+  for (int i = 0; i < cinfo->comps_in_scan; ++i) {
+    const jpeg_component_info* comp = cinfo->cur_comp_info[i];
+    JPEGComponent* c = &m->components_[comp->component_index];
+    int block_x = m->scan_mcu_col_ * comp->MCU_width;
+    for (int iy = 0; iy < comp->MCU_height; ++iy) {
+      int block_y = m->scan_mcu_row_ * comp->MCU_height + iy;
+      size_t ncoeffs = comp->MCU_width * DCTSIZE2;
+      int block_idx = (block_y * comp->width_in_blocks + block_x) * DCTSIZE2;
       coeff_t* coeffs = &c->coeffs[block_idx];
       memcpy(coeffs, &m->mcu_.coeffs[offset], ncoeffs * sizeof(coeffs[0]));
       offset += ncoeffs;
@@ -382,9 +382,9 @@ void RestoreMCUCodingState(j_decompress_ptr cinfo) {
 bool ProcessScan(j_decompress_ptr cinfo, const uint8_t* data, size_t len,
                  size_t* pos) {
   jpeg_decomp_master* m = cinfo->master;
-  for (; m->scan_mcu_col_ < m->scan_info_.MCU_cols; ++m->scan_mcu_col_) {
+  for (; m->scan_mcu_col_ < cinfo->MCUs_per_row; ++m->scan_mcu_col_) {
     // Handle the restart intervals.
-    if (m->restart_interval_ > 0 && m->restarts_to_go_ == 0) {
+    if (cinfo->restart_interval > 0 && m->restarts_to_go_ == 0) {
       if (m->eobrun_ > 0) {
         JPEGLI_ERROR("End-of-block run too long.");
       }
@@ -404,7 +404,7 @@ bool ProcessScan(j_decompress_ptr cinfo, const uint8_t* data, size_t len,
       }
       m->next_restart_marker_ += 1;
       m->next_restart_marker_ &= 0x7;
-      m->restarts_to_go_ = m->restart_interval_;
+      m->restarts_to_go_ = cinfo->restart_interval;
       memset(m->last_dc_coeff_, 0, sizeof(m->last_dc_coeff_));
       m->eobrun_ = -1;  // fresh start
       *pos += 2;
@@ -422,29 +422,29 @@ bool ProcessScan(j_decompress_ptr cinfo, const uint8_t* data, size_t len,
 
     // Decode one MCU.
     bool scan_ok = true;
-    for (size_t i = 0; i < m->scan_info_.num_components; ++i) {
-      JPEGComponentScanInfo* si = &m->scan_info_.components[i];
-      JPEGComponent* c = &m->components_[si->comp_idx];
+    for (int i = 0; i < cinfo->comps_in_scan; ++i) {
+      const jpeg_component_info* comp = cinfo->cur_comp_info[i];
+      JPEGComponent* c = &m->components_[comp->component_index];
       const HuffmanTableEntry* dc_lut =
-          &m->dc_huff_lut_[si->dc_tbl_idx * kJpegHuffmanLutSize];
+          &m->dc_huff_lut_[comp->dc_tbl_no * kJpegHuffmanLutSize];
       const HuffmanTableEntry* ac_lut =
-          &m->ac_huff_lut_[si->ac_tbl_idx * kJpegHuffmanLutSize];
-      for (uint32_t iy = 0; iy < si->mcu_ysize_blocks; ++iy) {
-        int block_y = m->scan_mcu_row_ * si->mcu_ysize_blocks + iy;
-        for (uint32_t ix = 0; ix < si->mcu_xsize_blocks; ++ix) {
-          int block_x = m->scan_mcu_col_ * si->mcu_xsize_blocks + ix;
-          int block_idx = block_y * c->width_in_blocks + block_x;
+          &m->ac_huff_lut_[comp->ac_tbl_no * kJpegHuffmanLutSize];
+      for (int iy = 0; iy < comp->MCU_height; ++iy) {
+        int block_y = m->scan_mcu_row_ * comp->MCU_height + iy;
+        for (int ix = 0; ix < comp->MCU_width; ++ix) {
+          int block_x = m->scan_mcu_col_ * comp->MCU_width + ix;
+          int block_idx = block_y * comp->width_in_blocks + block_x;
           coeff_t* coeffs = &c->coeffs[block_idx * DCTSIZE2];
-          if (m->scan_info_.Ah == 0) {
-            if (!DecodeDCTBlock(dc_lut, ac_lut, m->scan_info_.Ss,
-                                m->scan_info_.Se, m->scan_info_.Al, &m->eobrun_,
-                                &br, &m->last_dc_coeff_[si->comp_idx],
+          if (cinfo->Ah == 0) {
+            if (!DecodeDCTBlock(dc_lut, ac_lut, cinfo->Ss, cinfo->Se, cinfo->Al,
+                                &m->eobrun_, &br,
+                                &m->last_dc_coeff_[comp->component_index],
                                 coeffs)) {
               scan_ok = false;
             }
           } else {
-            if (!RefineDCTBlock(ac_lut, m->scan_info_.Ss, m->scan_info_.Se,
-                                m->scan_info_.Al, &m->eobrun_, &br, coeffs)) {
+            if (!RefineDCTBlock(ac_lut, cinfo->Ss, cinfo->Se, cinfo->Al,
+                                &m->eobrun_, &br, coeffs)) {
               scan_ok = false;
             }
           }
@@ -481,7 +481,7 @@ bool ProcessScan(j_decompress_ptr cinfo, const uint8_t* data, size_t len,
   }
   ++m->scan_mcu_row_;
   m->scan_mcu_col_ = 0;
-  if (m->scan_mcu_row_ == m->scan_info_.MCU_rows) {
+  if (m->scan_mcu_row_ == cinfo->MCU_rows_in_scan) {
     // Current scan is done, skip any remaining bits in the last byte.
     if (m->codestream_bits_ahead_ > 0) {
       ++(*pos);
@@ -491,11 +491,11 @@ bool ProcessScan(j_decompress_ptr cinfo, const uint8_t* data, size_t len,
     if (m->eobrun_ > 0) {
       JPEGLI_ERROR("End-of-block run too long.");
     }
-    if (m->is_progressive_) {
+    if (cinfo->progressive_mode) {
       m->state_ = jpeg_decomp_master::State::kProcessMarkers;
     }
   }
-  if (!m->is_progressive_) {
+  if (!cinfo->progressive_mode) {
     m->state_ = jpeg_decomp_master::State::kRender;
   }
   return true;

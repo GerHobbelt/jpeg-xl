@@ -17,6 +17,7 @@ Please add missing software to this list.
 - Safari: not supported, [tracking bug](https://bugs.webkit.org/show_bug.cgi?id=208235)
 - Edge: behind a flag since version 91, start with `.\msedge.exe --enable-features=JXL`
 - Opera: behind a flag since version 77.
+- Pale Moon: supported since version 31.4.0, [release notes](https://www.palemoon.org/releasenotes.shtml)
 - For all browsers and to track browsers progress see [Can I Use](https://caniuse.com/jpegxl).
 
 ## Image libraries
@@ -26,6 +27,7 @@ Please add missing software to this list.
 - [Imlib2](https://github.com/alistair7/imlib2-jxl)
 - [FFmpeg](https://github.com/FFmpeg/FFmpeg/search?q=jpeg-xl&type=commits)
 - [GDAL](https://gdal.org/drivers/raster/jpegxl.html): supported since 3.4.0 as a TIFF codec, and 3.6.0 as standalone format
+- [GraphicsMagick](http://www.graphicsmagick.org/NEWS.html#march-26-2022): supported since 1.3.38
 
 ## OS-level support / UI frameworks / file browser plugins
 

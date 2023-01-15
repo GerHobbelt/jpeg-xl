@@ -14,114 +14,11 @@
 #include <vector>
 
 #include "gtest/gtest.h"
+#include "lib/jpegli/test_utils.h"
 #include "lib/jxl/base/file_io.h"
 
 namespace jpegli {
 namespace {
-
-std::vector<uint8_t> ReadTestData(const std::string& filename) {
-  std::string full_path = std::string(TEST_DATA_PATH "/") + filename;
-  std::vector<uint8_t> data;
-  JXL_CHECK(jxl::ReadFile(full_path, &data));
-  printf("Test data %s is %d bytes long.\n", filename.c_str(),
-         static_cast<int>(data.size()));
-  return data;
-}
-
-class PNMParser {
- public:
-  explicit PNMParser(const uint8_t* data, const size_t len)
-      : pos_(data), end_(data + len) {}
-
-  // Sets "pos" to the first non-header byte/pixel on success.
-  bool ParseHeader(const uint8_t** pos, size_t* xsize, size_t* ysize,
-                   size_t* num_channels, size_t* bitdepth) {
-    if (pos_[0] != 'P' || (pos_[1] != '5' && pos_[1] != '6')) {
-      fprintf(stderr, "Invalid PNM header.");
-      return false;
-    }
-    *num_channels = (pos_[1] == '5' ? 1 : 3);
-    pos_ += 2;
-
-    size_t maxval;
-    if (!SkipWhitespace() || !ParseUnsigned(xsize) || !SkipWhitespace() ||
-        !ParseUnsigned(ysize) || !SkipWhitespace() || !ParseUnsigned(&maxval) ||
-        !SkipWhitespace()) {
-      return false;
-    }
-    if (maxval == 0 || maxval >= 65536) {
-      fprintf(stderr, "Invalid maxval value.\n");
-      return false;
-    }
-    bool found_bitdepth = false;
-    for (int bits = 1; bits <= 16; ++bits) {
-      if (maxval == (1u << bits) - 1) {
-        *bitdepth = bits;
-        found_bitdepth = true;
-        break;
-      }
-    }
-    if (!found_bitdepth) {
-      fprintf(stderr, "Invalid maxval value.\n");
-      return false;
-    }
-
-    *pos = pos_;
-    return true;
-  }
-
- private:
-  static bool IsLineBreak(const uint8_t c) { return c == '\r' || c == '\n'; }
-  static bool IsWhitespace(const uint8_t c) {
-    return IsLineBreak(c) || c == '\t' || c == ' ';
-  }
-
-  bool ParseUnsigned(size_t* number) {
-    if (pos_ == end_ || *pos_ < '0' || *pos_ > '9') {
-      fprintf(stderr, "Expected unsigned number.\n");
-      return false;
-    }
-    *number = 0;
-    while (pos_ < end_ && *pos_ >= '0' && *pos_ <= '9') {
-      *number *= 10;
-      *number += *pos_ - '0';
-      ++pos_;
-    }
-
-    return true;
-  }
-
-  bool SkipWhitespace() {
-    if (pos_ == end_ || !IsWhitespace(*pos_)) {
-      fprintf(stderr, "Expected whitespace.\n");
-      return false;
-    }
-    while (pos_ < end_ && IsWhitespace(*pos_)) {
-      ++pos_;
-    }
-    return true;
-  }
-
-  const uint8_t* pos_;
-  const uint8_t* const end_;
-};
-
-bool ReadPNM(const std::vector<uint8_t>& data, size_t* xsize, size_t* ysize,
-             size_t* num_channels, size_t* bitdepth,
-             std::vector<uint8_t>* pixels) {
-  if (data.size() < 2) {
-    fprintf(stderr, "PNM file too small.\n");
-    return false;
-  }
-  PNMParser parser(data.data(), data.size());
-  const uint8_t* pos = nullptr;
-  if (!parser.ParseHeader(&pos, xsize, ysize, num_channels, bitdepth)) {
-    return false;
-  }
-  pixels->resize(data.data() + data.size() - pos);
-  memcpy(&(*pixels)[0], pos, pixels->size());
-  return true;
-}
 
 static constexpr uint8_t kFakeEoiMarker[2] = {0xff, 0xd9};
 
@@ -179,6 +76,7 @@ struct TestConfig {
   std::string origfn;
   size_t chunk_size;
   size_t max_output_lines;
+  size_t output_bit_depth;
   float max_distance;
 };
 
@@ -222,22 +120,29 @@ TEST_P(DecodeAPITestParam, TestAPI) {
   EXPECT_EQ(ysize, cinfo.image_height);
   EXPECT_EQ(num_channels, cinfo.num_components);
 
+  cinfo.quantize_colors = FALSE;
+  cinfo.desired_number_of_colors = 1 << config.output_bit_depth;
   ASSERT_TRUE(jpeg_start_decompress(&cinfo));
+  EXPECT_EQ(xsize, cinfo.output_width);
+  EXPECT_EQ(ysize, cinfo.output_height);
+  EXPECT_EQ(num_channels, cinfo.out_color_components);
 
-  size_t stride = cinfo.image_width * cinfo.num_components;
-  std::vector<uint8_t> output(cinfo.image_height * stride);
+  size_t bytes_per_sample = config.output_bit_depth <= 8 ? 1 : 2;
+  size_t stride = cinfo.output_width * cinfo.num_components * bytes_per_sample;
+  std::vector<uint8_t> output(cinfo.output_height * stride);
   size_t max_output_lines = config.max_output_lines;
-  if (max_output_lines == 0) max_output_lines = cinfo.image_height;
+  if (max_output_lines == 0) max_output_lines = cinfo.output_height;
   size_t total_output_lines = 0;
-  while (total_output_lines < cinfo.image_height) {
+  while (cinfo.output_scanline < cinfo.output_height) {
     std::vector<JSAMPROW> scanlines(max_output_lines);
     for (size_t i = 0; i < max_output_lines; ++i) {
-      scanlines[i] = &output[(total_output_lines + i) * stride];
+      scanlines[i] = &output[(cinfo.output_scanline + i) * stride];
     }
     size_t num_output_lines =
         jpeg_read_scanlines(&cinfo, &scanlines[0], max_output_lines);
     total_output_lines += num_output_lines;
-    if (total_output_lines < cinfo.image_height) {
+    EXPECT_EQ(total_output_lines, cinfo.output_scanline);
+    if (cinfo.output_scanline < cinfo.output_height) {
       EXPECT_EQ(num_output_lines, max_output_lines);
     }
   }
@@ -246,15 +151,25 @@ TEST_P(DecodeAPITestParam, TestAPI) {
 
   jpeg_destroy_decompress(&cinfo);
 
-  ASSERT_EQ(output.size(), orig.size());
+  ASSERT_EQ(output.size(), orig.size() * bytes_per_sample);
+  const double mul_orig = 1.0 / 255.0;
+  const double mul_output = 1.0 / ((1u << config.output_bit_depth) - 1);
   double diff2 = 0.0;
-  for (size_t i = 0; i < output.size(); ++i) {
-    double diff = orig[i] - output[i];
+  for (size_t i = 0; i < orig.size(); ++i) {
+    double sample_orig = orig[i] * mul_orig;
+    double sample_output;
+    if (bytes_per_sample == 1) {
+      sample_output = output[i];
+    } else {
+      sample_output = output[2 * i] + (output[2 * i + 1] << 8);
+    }
+    sample_output *= mul_output;
+    double diff = sample_orig - sample_output;
     diff2 += diff * diff;
   }
   double rms = std::sqrt(diff2 / orig.size());
 
-  EXPECT_LE(rms, config.max_distance);
+  EXPECT_LE(rms / mul_orig, config.max_distance);
 }
 
 std::vector<TestConfig> GenerateTests() {
@@ -269,14 +184,20 @@ std::vector<TestConfig> GenerateTests() {
     for (const auto& it : testfiles) {
       for (size_t chunk_size : {0, 1, 64, 65536}) {
         for (size_t max_output_lines : {0, 1, 8, 16}) {
-          TestConfig config;
-          config.fn = it.first;
-          config.fn_desc = it.second;
-          config.chunk_size = chunk_size;
-          config.max_output_lines = max_output_lines;
-          config.origfn = "jxl/flower/flower.pnm";
-          config.max_distance = 3.0;
-          all_tests.push_back(config);
+          for (size_t output_bit_depth : {8, 16}) {
+            TestConfig config;
+            config.fn = it.first;
+            config.fn_desc = it.second;
+            config.chunk_size = chunk_size;
+            config.output_bit_depth = output_bit_depth;
+            config.max_output_lines = max_output_lines;
+            config.origfn = "jxl/flower/flower.pnm";
+            config.max_distance = 2.2;
+            if (config.output_bit_depth == 16) {
+              config.max_distance = 2.1;
+            }
+            all_tests.push_back(config);
+          }
         }
       }
     }
@@ -300,6 +221,7 @@ std::vector<TestConfig> GenerateTests() {
           config.fn = it.first;
           config.fn_desc = it.second;
           config.chunk_size = chunk_size;
+          config.output_bit_depth = 8;
           config.max_output_lines = max_output_lines;
           config.origfn = "jxl/flower/flower.pnm";
           config.max_distance = 3.5;
@@ -327,6 +249,7 @@ std::ostream& operator<<(std::ostream& os, const TestConfig& c) {
   } else {
     os << "OutputLines" << c.max_output_lines;
   }
+  os << "BitDepth" << c.output_bit_depth;
   return os;
 }
 
@@ -337,8 +260,9 @@ std::string TestDescription(
   return name.str();
 }
 
-INSTANTIATE_TEST_SUITE_P(DecodeAPITest, DecodeAPITestParam,
-                         testing::ValuesIn(GenerateTests()), TestDescription);
+JPEGLI_INSTANTIATE_TEST_SUITE_P(DecodeAPITest, DecodeAPITestParam,
+                                testing::ValuesIn(GenerateTests()),
+                                TestDescription);
 
 }  // namespace
 }  // namespace jpegli
