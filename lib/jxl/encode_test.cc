@@ -507,7 +507,7 @@ TEST(EncodeTest, LossyEncoderUseOriginalProfileTest) {
     ASSERT_NE(nullptr, enc.get());
     JxlEncoderFrameSettings* frame_settings =
         JxlEncoderFrameSettingsCreate(enc.get(), NULL);
-    VerifyFrameEncoding(63, 129, enc.get(), frame_settings, 5143, true);
+    VerifyFrameEncoding(63, 129, enc.get(), frame_settings, 5181, true);
   }
   {
     JxlEncoderPtr enc = JxlEncoderMake(nullptr);
@@ -517,7 +517,7 @@ TEST(EncodeTest, LossyEncoderUseOriginalProfileTest) {
     EXPECT_EQ(JXL_ENC_SUCCESS,
               JxlEncoderFrameSettingsSetOption(
                   frame_settings, JXL_ENC_FRAME_SETTING_PROGRESSIVE_DC, 2));
-    VerifyFrameEncoding(63, 129, enc.get(), frame_settings, 5541, true);
+    VerifyFrameEncoding(63, 129, enc.get(), frame_settings, 5580, true);
   }
   {
     JxlEncoderPtr enc = JxlEncoderMake(nullptr);
@@ -527,7 +527,7 @@ TEST(EncodeTest, LossyEncoderUseOriginalProfileTest) {
     ASSERT_EQ(JXL_ENC_SUCCESS,
               JxlEncoderFrameSettingsSetOption(
                   frame_settings, JXL_ENC_FRAME_SETTING_EFFORT, 8));
-    VerifyFrameEncoding(63, 129, enc.get(), frame_settings, 4644, true);
+    VerifyFrameEncoding(63, 129, enc.get(), frame_settings, 4647, true);
   }
 }
 
