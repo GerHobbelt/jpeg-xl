@@ -57,6 +57,7 @@ target_include_directories(jpegli-static PUBLIC
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>"
   "$<BUILD_INTERFACE:$<TARGET_PROPERTY:hwy,INTERFACE_INCLUDE_DIRECTORIES>>"
 )
+target_include_directories(jpegli-static PUBLIC "${JPEG_INCLUDE_DIRS}")
 target_link_libraries(jpegli-static PUBLIC ${JPEGLI_INTERNAL_LIBS})
 
 #
@@ -108,6 +109,7 @@ endif()
 # Build libjpeg.so that links to libjpeg-static
 #
 
+if (JPEGXL_ENABLE_JPEGLI_LIBJPEG AND NOT APPLE AND NOT WIN32 AND NOT JPEGXL_EMSCRIPTEN)
 set(JPEGLI_LIBJPEG_MAJOR_VERSION 62)
 set(JPEGLI_LIBJPEG_MINOR_VERSION 3)
 set(JPEGLI_LIBJPEG_PATCH_VERSION 0)
@@ -156,4 +158,5 @@ set_property(TARGET jpeg APPEND_STRING PROPERTY
 if(LINKER_SUPPORT_EXCLUDE_LIBS)
   set_property(TARGET jpeg APPEND_STRING PROPERTY
     LINK_FLAGS " ${LINKER_EXCLUDE_LIBS_FLAG}")
+endif()
 endif()
