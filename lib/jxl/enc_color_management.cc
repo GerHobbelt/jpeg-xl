@@ -946,7 +946,7 @@ Status ColorEncoding::SetFieldsFromICC() {
   static constexpr auto kCICPSignature =
       static_cast<cmsTagSignature>(0x63696370);
   uint8_t cicp_buffer[kCICPSize];
-  if (cmsReadRawTag(profile.get(), kCICPSignature, cicp_buffer, kCICPSize) ==
+  if (cmsReadRawTag(context, profile.get(), kCICPSignature, cicp_buffer, kCICPSize) ==
           kCICPSize &&
       ApplyCICP(cicp_buffer[8], cicp_buffer[9], cicp_buffer[10],
                 cicp_buffer[11], this)) {
