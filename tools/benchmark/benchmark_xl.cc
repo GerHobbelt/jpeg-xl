@@ -49,6 +49,7 @@
 #include "tools/benchmark/benchmark_utils.h"
 #include "tools/codec_config.h"
 #include "tools/speed_stats.h"
+#include "tools/ssimulacra2.h"
 
 namespace jxl {
 namespace {
@@ -166,6 +167,10 @@ void DoCompress(const std::string& filename, const CodecInOut& io,
         }
         valid = false;
       }
+      // TODO(veluca): this is a hack. codec->Decompress should set the bitdepth
+      // correctly, but for jxl it currently sets it from the pixel format (i.e.
+      // 32-bit float).
+      io2.metadata.m.bit_depth = io.metadata.m.bit_depth;
 
       // io2.dec_pixels increases each time, but the total should be independent
       // of decode_reps, so only take the value from the first iteration.
@@ -239,6 +244,7 @@ void DoCompress(const std::string& filename, const CodecInOut& io,
       s->distance_p_norm +=
           ComputeDistanceP(distmap, Args()->ba_params, Args()->error_pnorm) *
           input_pixels;
+      s->ssimulacra2 += ComputeSSIMULACRA2(ib1, ib2).Score() * input_pixels;
       s->max_distance = std::max(s->max_distance, distance);
       s->distances.push_back(distance);
       max_distance = std::max(max_distance, distance);
