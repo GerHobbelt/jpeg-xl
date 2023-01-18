@@ -140,6 +140,7 @@ class JPEGCodec : public ImageCodec {
       const double end = Now();
       elapsed = end - start;
     } else {
+#if JPEGXL_ENABLE_JPEG
       extras::PackedPixelFile ppf;
       JxlPixelFormat format = {0, JXL_TYPE_UINT8, JXL_BIG_ENDIAN, 0};
       JXL_RETURN_IF_ERROR(ConvertCodecInOutToPackedPixelFile(
@@ -159,7 +160,11 @@ class JPEGCodec : public ImageCodec {
       const double end = Now();
       elapsed = end - start;
       *compressed = encoded.bitstreams.back();
-    }
+#else
+	  JXL_FAILURE("JPEGXL_ENABLE_JPEG not enabled in this build.");
+	  return false;
+#endif
+	}
     speed_stats->NotifyElapsed(elapsed);
     return true;
   }
@@ -179,12 +184,17 @@ class JPEGCodec : public ImageCodec {
       const double end = Now();
       speed_stats->NotifyElapsed(end - start);
     } else {
+#if JPEGXL_ENABLE_JPEG
       const double start = Now();
-      JXL_RETURN_IF_ERROR(DecodeImageJPG(compressed, extras::ColorHints(),
+      JXL_RETURN_IF_ERROR(jxl::extras::DecodeImageJPG(compressed, extras::ColorHints(),
                                          SizeConstraints(), bitdepth_, &ppf));
       const double end = Now();
       speed_stats->NotifyElapsed(end - start);
-    }
+#else
+	  JXL_FAILURE("JPEGXL_ENABLE_JPEG not enabled in this build.");
+	  return false;
+#endif
+	}
     JXL_RETURN_IF_ERROR(ConvertPackedPixelFileToCodecInOut(ppf, pool, io));
     return true;
   }

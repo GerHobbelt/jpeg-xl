@@ -4,6 +4,8 @@
 // license that can be found in the LICENSE file.
 #include "tools/benchmark/benchmark_codec_avif.h"
 
+#ifdef BENCHMARK_AVIF
+
 #include <avif/avif.h>
 
 #include "lib/extras/time.h"
@@ -358,3 +360,5 @@ ImageCodec* CreateNewAvifCodec(const BenchmarkArgs& args) {
 }
 
 }  // namespace jxl
+
+#endif
