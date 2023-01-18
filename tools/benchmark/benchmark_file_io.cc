@@ -10,7 +10,14 @@
 #include <cstdio>
 
 #if defined(_WIN32) || defined(_WIN64)
-#include "third_party/dirent.h"
+#include "dirent.h"
+#include <direct.h>
+
+static inline int mkdir(const char *path, int mode)
+{
+	return _mkdir(path);
+}
+
 #else
 #include <dirent.h>
 #include <unistd.h>
