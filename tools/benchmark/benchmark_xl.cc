@@ -1145,4 +1145,10 @@ int BenchmarkMain(int argc, const char** argv) {
 }  // namespace
 }  // namespace jxl
 
-int main(int argc, const char** argv) { return jxl::BenchmarkMain(argc, argv); }
+// TODO: add gbench benchmark too:
+extern "C" int gbench_benchmark_main(int argc, const char **argv);
+
+int main(int argc, const char** argv)
+{
+	return jxl::BenchmarkMain(argc, argv);
+}
