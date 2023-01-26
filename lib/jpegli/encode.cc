@@ -85,6 +85,7 @@ void SetICCAppMarker(const std::vector<uint8_t>& icc,
 }
 
 void AddJpegScanInfos(const std::vector<ProgressiveScan>& scans,
+                      const int num_components,
                       std::vector<jxl::jpeg::JPEGScanInfo>* scan_infos) {
   for (const auto& scan : scans) {
     jxl::jpeg::JPEGScanInfo si;
@@ -93,13 +94,13 @@ void AddJpegScanInfos(const std::vector<ProgressiveScan>& scans,
     si.Ah = scan.Ah;
     si.Al = scan.Al;
     if (scan.interleaved) {
-      si.num_components = 3;
-      for (uint32_t c = 0; c < 3; ++c) {
+      si.num_components = num_components;
+      for (int c = 0; c < num_components; ++c) {
         si.components[c].comp_idx = c;
       }
       scan_infos->push_back(si);
     } else {
-      for (uint32_t c = 0; c < 3; ++c) {
+      for (int c = 0; c < num_components; ++c) {
         si.num_components = 1;
         si.components[0].comp_idx = c;
         scan_infos->push_back(si);
@@ -142,6 +143,7 @@ void jpegli_CreateCompress(j_compress_ptr cinfo, int version,
   cinfo->master->cur_marker_data = nullptr;
   cinfo->master->distance = 1.0;
   cinfo->master->xyb_mode = false;
+  cinfo->master->use_adaptive_quantization = true;
   cinfo->master->data_type = JPEGLI_TYPE_UINT8;
   cinfo->master->endianness = JPEGLI_NATIVE_ENDIAN;
 }
@@ -273,14 +275,18 @@ void jpegli_start_compress(j_compress_ptr cinfo, boolean write_all_tables) {
 JDIMENSION jpegli_write_scanlines(j_compress_ptr cinfo, JSAMPARRAY scanlines,
                                   JDIMENSION num_lines) {
   jpeg_comp_master* m = cinfo->master;
-  // TODO(szabadka) Handle CMYK component input images.
-  if (cinfo->num_components != 3) {
-    // TODO(szabadka) Remove this restriction.
-    JPEGLI_ERROR("Only RGB input is supported.");
+  // TODO(szabadka) Handle CMYK input images.
+  if (cinfo->num_components > 3) {
+    JPEGLI_ERROR("Invalid number of components.");
   }
   if (num_lines + cinfo->next_scanline > cinfo->image_height) {
     num_lines = cinfo->image_height - cinfo->next_scanline;
   }
+  // const int bytes_per_sample = jpegli_bytes_per_sample(m->data_type);
+  const int bytes_per_sample = m->data_type == JPEGLI_TYPE_UINT8    ? 1
+                               : m->data_type == JPEGLI_TYPE_UINT16 ? 2
+                                                                    : 4;
+  const int pwidth = cinfo->num_components * bytes_per_sample;
   bool is_little_endian =
       (m->endianness == JPEGLI_LITTLE_ENDIAN ||
        (m->endianness == JPEGLI_NATIVE_ENDIAN && IsLittleEndian()));
@@ -291,27 +297,27 @@ JDIMENSION jpegli_write_scanlines(j_compress_ptr cinfo, JSAMPARRAY scanlines,
       float* row = m->input.PlaneRow(c, cinfo->next_scanline + i);
       if (m->data_type == JPEGLI_TYPE_UINT8) {
         uint8_t* p = &scanlines[i][c];
-        for (size_t x = 0; x < cinfo->image_width; ++x, p += 3) {
+        for (size_t x = 0; x < cinfo->image_width; ++x, p += pwidth) {
           row[x] = p[0] * kMul8;
         }
       } else if (m->data_type == JPEGLI_TYPE_UINT16 && is_little_endian) {
         uint8_t* p = &scanlines[i][c * 2];
-        for (size_t x = 0; x < cinfo->image_width; ++x, p += 6) {
+        for (size_t x = 0; x < cinfo->image_width; ++x, p += pwidth) {
           row[x] = LoadLE16(p) * kMul16;
         }
       } else if (m->data_type == JPEGLI_TYPE_UINT16 && !is_little_endian) {
         uint8_t* p = &scanlines[i][c * 2];
-        for (size_t x = 0; x < cinfo->image_width; ++x, p += 6) {
+        for (size_t x = 0; x < cinfo->image_width; ++x, p += pwidth) {
           row[x] = LoadBE16(p) * kMul16;
         }
       } else if (m->data_type == JPEGLI_TYPE_FLOAT && is_little_endian) {
         uint8_t* p = &scanlines[i][c * 4];
-        for (size_t x = 0; x < cinfo->image_width; ++x, p += 12) {
+        for (size_t x = 0; x < cinfo->image_width; ++x, p += pwidth) {
           row[x] = LoadLEFloat(p);
         }
       } else if (m->data_type == JPEGLI_TYPE_FLOAT && !is_little_endian) {
         uint8_t* p = &scanlines[i][c * 4];
-        for (size_t x = 0; x < cinfo->image_width; ++x, p += 12) {
+        for (size_t x = 0; x < cinfo->image_width; ++x, p += pwidth) {
           row[x] = LoadBEFloat(p);
         }
       }
@@ -323,16 +329,22 @@ JDIMENSION jpegli_write_scanlines(j_compress_ptr cinfo, JSAMPARRAY scanlines,
 
 void jpegli_finish_compress(j_compress_ptr cinfo) {
   jpeg_comp_master* m = cinfo->master;
-  if (cinfo->num_components != 3) {
-    // TODO(szabadka) Remove this restriction.
-    JPEGLI_ERROR("Only RGB input is supported.");
+
+  const bool use_xyb = m->xyb_mode;
+  const bool use_aq = m->use_adaptive_quantization;
+
+  if (use_xyb && cinfo->num_components != 3) {
+    JPEGLI_ERROR("Only RGB input is supported in XYB mode.");
+  }
+  if (cinfo->num_components == 1) {
+    CopyImageTo(m->input.Plane(0), &m->input.Plane(1));
+    CopyImageTo(m->input.Plane(0), &m->input.Plane(2));
   }
   m->jpeg_data.components.resize(cinfo->num_components);
   jxl::ColorEncoding color_encoding;
   if (!jxl::jpeg::SetColorEncodingFromJpegData(m->jpeg_data, &color_encoding)) {
     JPEGLI_ERROR("Could not parse ICC profile.");
   }
-  const bool use_xyb = m->xyb_mode;
   if (use_xyb) {
     jpegli::SetICCAppMarker(jpegli::CreateXybICCAppMarker(), &m->jpeg_data);
   }
@@ -393,9 +405,16 @@ void jpegli_finish_compress(j_compress_ptr cinfo) {
   PadImageToBlockMultipleInPlace(&opsin, 8 << max_shift);
 
   // Compute adaptive quant field.
-  jxl::ImageF mask;
-  jxl::ImageF qf =
-      jxl::InitialQuantField(distance, opsin, frame_dim, nullptr, 1.0, &mask);
+  jxl::ImageF qf(frame_dim.xsize_blocks, frame_dim.ysize_blocks);
+  if (use_aq) {
+    jxl::ImageF mask;
+    qf = jxl::InitialQuantField(distance, opsin, frame_dim, nullptr, distance,
+                                &mask);
+  } else {
+    FillImage(0.6f, &qf);
+  }
+  float qfmin, qfmax;
+  ImageMinMax(qf, &qfmin, &qfmax);
   if (use_xyb) {
     ScaleXYB(&opsin);
   } else {
@@ -407,15 +426,17 @@ void jpegli_finish_compress(j_compress_ptr cinfo) {
   }
 
   // Create jpeg data and optimize Huffman codes.
-  float global_scale = 0.66f;
+  float ac_scale = distance / qfmax;
+  float dc_scale = 1.0f / jxl::InitialQuantDC(distance);
   if (!use_xyb) {
     if (color_encoding.tf.IsPQ()) {
-      global_scale *= .4f;
+      dc_scale *= .4f;
+      ac_scale *= .4f;
     } else if (color_encoding.tf.IsHLG()) {
-      global_scale *= .5f;
+      dc_scale *= .5f;
+      ac_scale *= .5f;
     }
   }
-  float dc_quant = jxl::InitialQuantDC(distance);
 
   // APPn
   for (const auto& v : m->jpeg_data.app_data) {
@@ -427,12 +448,11 @@ void jpegli_finish_compress(j_compress_ptr cinfo) {
   // DQT
   m->jpeg_data.marker_order.emplace_back(0xdb);
   float qm[3 * jxl::kDCTBlockSize];
-  jpegli::AddJpegQuantMatrices(qf, use_xyb, dc_quant, global_scale,
-                               &m->jpeg_data.quant, qm);
+  jpegli::AddJpegQuantMatrices(use_xyb, cinfo->num_components, dc_scale,
+                               ac_scale, &m->jpeg_data.quant, qm);
 
   // SOF
   m->jpeg_data.marker_order.emplace_back(0xc2);
-  m->jpeg_data.components.resize(3);
   m->jpeg_data.height = frame_dim.ysize;
   m->jpeg_data.width = frame_dim.xsize;
   if (use_xyb) {
@@ -440,12 +460,12 @@ void jpegli_finish_compress(j_compress_ptr cinfo) {
     m->jpeg_data.components[1].id = 'G';
     m->jpeg_data.components[2].id = 'B';
   } else {
-    m->jpeg_data.components[0].id = 1;
-    m->jpeg_data.components[1].id = 2;
-    m->jpeg_data.components[2].id = 3;
+    for (int i = 0; i < cinfo->num_components; ++i) {
+      m->jpeg_data.components[i].id = i + 1;
+    }
   }
   size_t max_samp_factor = 1u << max_shift;
-  for (size_t c = 0; c < 3; ++c) {
+  for (int c = 0; c < cinfo->num_components; ++c) {
     const size_t factor =
         (cinfo->max_h_samp_factor / cinfo->comp_info[c].h_samp_factor);
     m->jpeg_data.components[c].h_samp_factor = max_samp_factor / factor;
@@ -471,7 +491,8 @@ void jpegli_finish_compress(j_compress_ptr cinfo) {
       {3, 63, 2, 1, false},        {3, 63, 1, 0, false},
   };
   if (cinfo->scan_info == nullptr) {
-    jpegli::AddJpegScanInfos(progressive_mode, &m->jpeg_data.scan_info);
+    jpegli::AddJpegScanInfos(progressive_mode, cinfo->num_components,
+                             &m->jpeg_data.scan_info);
   } else {
     jpegli::CopyJpegScanInfos(cinfo, &m->jpeg_data.scan_info);
   }
@@ -514,4 +535,8 @@ void jpegli_set_input_format(j_compress_ptr cinfo, JpegliDataType data_type,
                              JpegliEndianness endianness) {
   cinfo->master->data_type = data_type;
   cinfo->master->endianness = endianness;
+}
+
+void jpegli_enable_adaptive_quantization(j_compress_ptr cinfo, boolean value) {
+  cinfo->master->use_adaptive_quantization = value;
 }

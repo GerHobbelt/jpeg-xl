@@ -30,7 +30,7 @@ void ComputeDCTCoefficients(const jxl::Image3F& opsin, const bool xyb,
   ImageMinMax(qf, &qfmin, &qfmax);
   HWY_ALIGN float scratch_space[2 * jxl::kDCTBlockSize];
   jxl::ImageF tmp;
-  for (size_t c = 0; c < 3; c++) {
+  for (size_t c = 0; c < components->size(); c++) {
     auto& comp = (*components)[c];
     const size_t xsize_blocks = comp.width_in_blocks;
     const size_t ysize_blocks = comp.height_in_blocks;
@@ -59,11 +59,6 @@ void ComputeDCTCoefficients(const jxl::Image3F& opsin, const bool xyb,
             // quantization multiplier.
             float zero_bias = 0.5f * qfmax / qf.Row(by * factor)[bx * factor];
             int cc = std::abs(coeff) < zero_bias ? 0 : std::round(coeff);
-            // If the relative value of the adaptive quantization field is less
-            // than 0.5, we drop the least significant bit.
-            if (zero_bias > 1) {
-              cc = cc / 2 * 2;
-            }
             block[ix * 8 + iy] = cc;
           }
         }
