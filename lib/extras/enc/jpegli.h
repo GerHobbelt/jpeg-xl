@@ -24,6 +24,8 @@ struct JpegSettings {
   size_t target_size = 0;
   float distance = 1.f;
   bool use_adaptive_quantization = true;
+  bool use_std_quant_tables = false;
+  int progressive_level = 2;
 };
 
 Status EncodeJpeg(const PackedPixelFile& ppf, const JpegSettings& jpeg_settings,

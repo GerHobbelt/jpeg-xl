@@ -106,6 +106,17 @@ void jpegli_set_input_format(j_compress_ptr cinfo, JpegliDataType data_type,
 // Enabled by default.
 void jpegli_enable_adaptive_quantization(j_compress_ptr cinfo, boolean value);
 
+// Sets the default progression parameters, where level 0 is sequential, and
+// greater level value means more progression steps. Default is 2.
+void jpegli_set_progressive_level(j_compress_ptr cinfo, int level);
+
+// If this function is called before starting compression, the quality and
+// linear quality parameters will be used to scale the standard quantization
+// tables from Annex K of the JPEG standard. By default jpegli uses a different
+// set of quantization tables and used different scaling parameters for DC and
+// AC coefficients.
+void jpegli_use_standard_quant_tables(j_compress_ptr cinfo);
+
 #if defined(__cplusplus) || defined(c_plusplus)
 }  // extern "C"
 #endif

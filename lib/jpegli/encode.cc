@@ -34,6 +34,22 @@ float LinearQualityToDistance(int scale_factor) {
   return jpegli_quality_to_distance(quality);
 }
 
+float DistanceToLinearQuality(float distance) {
+  if (distance <= 0.1f) {
+    return 1.0f;
+  } else if (distance <= 4.6f) {
+    return (200.0f / 9.0f) * (distance - 0.1f);
+  } else if (distance <= 6.4f) {
+    return 5000.0f / (100.0f - (distance - 0.1f) / 0.09f);
+  } else if (distance < 25.0f) {
+    return 530000.0f /
+           (3450.0f -
+            300.0f * std::sqrt((848.0f * distance - 5330.0f) / 120.0f));
+  } else {
+    return 5000.0f;
+  }
+}
+
 struct ProgressiveScan {
   int Ss, Se, Ah, Al;
   bool interleaved;
@@ -143,7 +159,9 @@ void jpegli_CreateCompress(j_compress_ptr cinfo, int version,
   cinfo->master->cur_marker_data = nullptr;
   cinfo->master->distance = 1.0;
   cinfo->master->xyb_mode = false;
+  cinfo->master->use_std_tables = false;
   cinfo->master->use_adaptive_quantization = true;
+  cinfo->master->progressive_level = 2;
   cinfo->master->data_type = JPEGLI_TYPE_UINT8;
   cinfo->master->endianness = JPEGLI_NATIVE_ENDIAN;
 }
@@ -207,7 +225,9 @@ void jpegli_add_quant_table(j_compress_ptr cinfo, int which_tbl,
                             const unsigned int* basic_table, int scale_factor,
                             boolean force_baseline) {}
 
-void jpegli_simple_progression(j_compress_ptr cinfo) {}
+void jpegli_simple_progression(j_compress_ptr cinfo) {
+  jpegli_set_progressive_level(cinfo, 2);
+}
 
 void jpegli_suppress_tables(j_compress_ptr cinfo, boolean suppress) {}
 
@@ -332,6 +352,10 @@ void jpegli_finish_compress(j_compress_ptr cinfo) {
 
   const bool use_xyb = m->xyb_mode;
   const bool use_aq = m->use_adaptive_quantization;
+  const bool use_std_tables = m->use_std_tables;
+  jpegli::QuantMode quant_mode = use_xyb          ? jpegli::QUANT_XYB
+                                 : use_std_tables ? jpegli::QUANT_STD
+                                                  : jpegli::QUANT_YUV;
 
   if (use_xyb && cinfo->num_components != 3) {
     JPEGLI_ERROR("Only RGB input is supported in XYB mode.");
@@ -399,10 +423,12 @@ void jpegli_finish_compress(j_compress_ptr cinfo) {
 
   // Convert input to XYB colorspace.
   jxl::Image3F opsin(frame_dim.xsize_padded, frame_dim.ysize_padded);
-  opsin.ShrinkTo(frame_dim.xsize, frame_dim.ysize);
-  jxl::Image3FToXYB(input, color_encoding, 255.0, nullptr, &opsin,
-                    jxl::GetJxlCms());
-  PadImageToBlockMultipleInPlace(&opsin, 8 << max_shift);
+  if (use_xyb || use_aq) {
+    opsin.ShrinkTo(frame_dim.xsize, frame_dim.ysize);
+    jxl::Image3FToXYB(input, color_encoding, 255.0, nullptr, &opsin,
+                      jxl::GetJxlCms());
+    PadImageToBlockMultipleInPlace(&opsin, 8 << max_shift);
+  }
 
   // Compute adaptive quant field.
   jxl::ImageF qf(frame_dim.xsize_blocks, frame_dim.ysize_blocks);
@@ -415,6 +441,7 @@ void jpegli_finish_compress(j_compress_ptr cinfo) {
   }
   float qfmin, qfmax;
   ImageMinMax(qf, &qfmin, &qfmax);
+
   if (use_xyb) {
     ScaleXYB(&opsin);
   } else {
@@ -425,19 +452,32 @@ void jpegli_finish_compress(j_compress_ptr cinfo) {
     PadImageToBlockMultipleInPlace(&opsin, 8 << max_shift);
   }
 
-  // Create jpeg data and optimize Huffman codes.
-  float ac_scale = distance / qfmax;
-  float dc_scale = 1.0f / jxl::InitialQuantDC(distance);
+  // Global scale is chosen in a way that butteraugli 3-norm matches libjpeg
+  // with the same quality setting. Fitted for quality 90 on jyrki31 corpus.
+  constexpr float kGlobalScaleXYB = 0.92159151f;
+  constexpr float kGlobalScaleYCbCr = 1.10048560f;
+  constexpr float kGlobalScaleStd = 1.0f;
+  constexpr float kGlobalScales[jpegli::NUM_QUANT_MODES] = {
+      kGlobalScaleXYB, kGlobalScaleYCbCr, kGlobalScaleStd};
+  float global_scale = kGlobalScales[quant_mode];
+  float ac_scale, dc_scale;
   if (!use_xyb) {
     if (color_encoding.tf.IsPQ()) {
-      dc_scale *= .4f;
-      ac_scale *= .4f;
+      global_scale *= .4f;
     } else if (color_encoding.tf.IsHLG()) {
-      dc_scale *= .5f;
-      ac_scale *= .5f;
+      global_scale *= .5f;
     }
   }
+  if (use_xyb || !use_std_tables) {
+    ac_scale = global_scale * distance / qfmax;
+    dc_scale = global_scale / jxl::InitialQuantDC(distance);
+  } else {
+    float linear_scale = 0.01f * jpegli::DistanceToLinearQuality(distance);
+    ac_scale = global_scale * linear_scale;
+    dc_scale = global_scale * linear_scale;
+  }
 
+  // Create jpeg data and optimize Huffman codes.
   // APPn
   for (const auto& v : m->jpeg_data.app_data) {
     JXL_DASSERT(!v.empty());
@@ -448,11 +488,13 @@ void jpegli_finish_compress(j_compress_ptr cinfo) {
   // DQT
   m->jpeg_data.marker_order.emplace_back(0xdb);
   float qm[3 * jxl::kDCTBlockSize];
-  jpegli::AddJpegQuantMatrices(use_xyb, cinfo->num_components, dc_scale,
+  jpegli::AddJpegQuantMatrices(quant_mode, cinfo->num_components, dc_scale,
                                ac_scale, &m->jpeg_data.quant, qm);
 
   // SOF
-  m->jpeg_data.marker_order.emplace_back(0xc2);
+  bool is_sequential = cinfo->num_scans == 1 ||
+                       (cinfo->num_scans == 0 && m->progressive_level == 0);
+  m->jpeg_data.marker_order.emplace_back(is_sequential ? 0xc0 : 0xc2);
   m->jpeg_data.height = frame_dim.ysize;
   m->jpeg_data.width = frame_dim.xsize;
   if (use_xyb) {
@@ -478,18 +520,26 @@ void jpegli_finish_compress(j_compress_ptr cinfo) {
         frame_dim.ysize_blocks / factor;
     m->jpeg_data.components[c].quant_idx = c;
   }
-  jpegli::ComputeDCTCoefficients(opsin, use_xyb, qf, qm,
+  jpegli::ComputeDCTCoefficients(opsin, distance, use_xyb, qf, qm,
                                  &m->jpeg_data.components);
 
   // DHT (the actual Huffman codes will be added later).
   m->jpeg_data.marker_order.emplace_back(0xc4);
 
-  // SOS
-  std::vector<jpegli::ProgressiveScan> progressive_mode = {
-      // DC
-      {0, 0, 0, 0, max_shift > 0}, {1, 2, 0, 0, false},  {3, 63, 0, 2, false},
-      {3, 63, 2, 1, false},        {3, 63, 1, 0, false},
-  };
+  std::vector<jpegli::ProgressiveScan> progressive_mode;
+  if (m->progressive_level == 0) {
+    progressive_mode.push_back({0, 63, 0, 0, true});
+  } else if (m->progressive_level == 1) {
+    progressive_mode.push_back({0, 0, 0, 0, max_shift > 0});
+    progressive_mode.push_back({1, 63, 0, 1, false});
+    progressive_mode.push_back({1, 63, 1, 0, false});
+  } else {
+    progressive_mode.push_back({0, 0, 0, 0, max_shift > 0});
+    progressive_mode.push_back({1, 2, 0, 0, false});
+    progressive_mode.push_back({3, 63, 0, 2, false});
+    progressive_mode.push_back({3, 63, 2, 1, false});
+    progressive_mode.push_back({3, 63, 1, 0, false});
+  }
   if (cinfo->scan_info == nullptr) {
     jpegli::AddJpegScanInfos(progressive_mode, cinfo->num_components,
                              &m->jpeg_data.scan_info);
@@ -539,4 +589,15 @@ void jpegli_set_input_format(j_compress_ptr cinfo, JpegliDataType data_type,
 
 void jpegli_enable_adaptive_quantization(j_compress_ptr cinfo, boolean value) {
   cinfo->master->use_adaptive_quantization = value;
+}
+
+void jpegli_set_progressive_level(j_compress_ptr cinfo, int level) {
+  if (level < 0) {
+    JPEGLI_ERROR("Invalid progressive level %d", level);
+  }
+  cinfo->master->progressive_level = level;
+}
+
+void jpegli_use_standard_quant_tables(j_compress_ptr cinfo) {
+  cinfo->master->use_std_tables = true;
 }

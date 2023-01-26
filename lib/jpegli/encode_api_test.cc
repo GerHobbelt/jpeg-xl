@@ -126,6 +126,7 @@ void TestDecodedImage(const std::vector<uint8_t>& compressed,
     diff2 += diff * diff;
   }
   double rms = std::sqrt(diff2 / orig.size()) / mul;
+  printf("rms: %f\n", rms);
   EXPECT_LE(rms, max_dist);
 }
 
@@ -144,7 +145,9 @@ struct TestConfig {
   int quality = 90;
   ChromaSubsampling sampling = SAMPLING_444;
   int progressive_id = 0;
+  int progressive_level = -1;
   bool xyb_mode = false;
+  bool libjpeg_mode = false;
   double max_bpp;
   double max_dist;
 };
@@ -196,11 +199,17 @@ TEST_P(EncodeAPITestParam, TestAPI) {
     const ScanScript& script = kTestScript[config.progressive_id - 1];
     cinfo.scan_info = script.scans;
     cinfo.num_scans = script.num_scans;
+  } else if (config.progressive_level >= 0) {
+    jpegli_set_progressive_level(&cinfo, config.progressive_level);
   }
   cinfo.optimize_coding = TRUE;
   jpegli_set_quality(&cinfo, config.quality, TRUE);
   if (config.xyb_mode) {
     jpegli_set_xyb_mode(&cinfo);
+  } else if (config.libjpeg_mode) {
+    jpegli_enable_adaptive_quantization(&cinfo, FALSE);
+    jpegli_use_standard_quant_tables(&cinfo);
+    jpegli_set_progressive_level(&cinfo, 0);
   }
   jpegli_start_compress(&cinfo, TRUE);
   size_t stride = xsize * cinfo.input_components;
@@ -215,6 +224,7 @@ TEST_P(EncodeAPITestParam, TestAPI) {
   std::copy_n(buffer, size, compressed.data());
   std::free(buffer);
   double bpp = compressed.size() * 8.0 / (xsize * ysize);
+  printf("bpp: %f\n", bpp);
   EXPECT_LT(bpp, config.max_bpp);
   TestDecodedImage(compressed, orig, xsize, ysize, num_channels,
                    config.progressive_id, config.max_dist);
@@ -224,52 +234,68 @@ std::vector<TestConfig> GenerateTests() {
   std::vector<TestConfig> all_tests;
   {
     TestConfig config;
-    config.max_bpp = 1.7;
-    config.max_dist = 2.0;
+    config.max_bpp = 1.4;
+    config.max_dist = 2.3;
     all_tests.push_back(config);
   }
   {
     TestConfig config;
     config.quality = 100;
-    config.max_bpp = 4.65;
-    config.max_dist = 0.75;
+    config.max_bpp = 4.1;
+    config.max_dist = 0.85;
     all_tests.push_back(config);
   }
   {
     TestConfig config;
     config.quality = 80;
-    config.max_bpp = 1.0;
-    config.max_dist = 2.75;
+    config.max_bpp = 0.95;
+    config.max_dist = 2.8;
     all_tests.push_back(config);
   }
   {
     TestConfig config;
     config.sampling = SAMPLING_420;
-    config.max_bpp = 1.5;
-    config.max_dist = 2.4;
+    config.max_bpp = 1.25;
+    config.max_dist = 2.9;
     all_tests.push_back(config);
   }
   {
     for (size_t p = 0; p < kNumTestScripts; ++p) {
       TestConfig config;
       config.progressive_id = p + 1;
-      config.max_bpp = 1.75;
-      config.max_dist = 2.0;
+      config.max_bpp = 1.45;
+      config.max_dist = 2.3;
+      all_tests.push_back(config);
+    }
+  }
+  {
+    for (size_t l = 0; l <= 2; ++l) {
+      TestConfig config;
+      config.progressive_level = l;
+      config.max_bpp = 1.45;
+      config.max_dist = 2.3;
       all_tests.push_back(config);
     }
   }
   {
     TestConfig config;
     config.xyb_mode = true;
-    config.max_bpp = 1.22;
+    config.max_bpp = 1.3;
     config.max_dist = 60.0;
     all_tests.push_back(config);
   }
   {
     TestConfig config;
+    config.libjpeg_mode = true;
+    config.max_bpp = 2.1;
+    config.max_dist = 1.7;
+    all_tests.push_back(config);
+  }
+  {
+    TestConfig config;
     config.color = COLOR_GRAY;
-    config.max_bpp = 1.15;
-    config.max_dist = 1.3;
+    config.max_bpp = 1.05;
+    config.max_dist = 1.4;
     all_tests.push_back(config);
   }
   return all_tests;
@@ -290,8 +316,13 @@ std::ostream& operator<<(std::ostream& os, const TestConfig& c) {
   if (c.progressive_id > 0) {
     os << "P" << c.progressive_id;
   }
+  if (c.progressive_level >= 0) {
+    os << "PL" << c.progressive_level;
+  }
   if (c.xyb_mode) {
     os << "XYB";
+  } else if (c.libjpeg_mode) {
+    os << "Libjpeg";
   }
   return os;
 }
