@@ -187,7 +187,7 @@ class JPEGCodec : public ImageCodec {
 #if JPEGXL_ENABLE_JPEG
       const double start = Now();
       JXL_RETURN_IF_ERROR(jxl::extras::DecodeImageJPG(compressed, extras::ColorHints(),
-                                         SizeConstraints(), bitdepth_, &ppf));
+                                         SizeConstraints(), &ppf));
       const double end = Now();
       speed_stats->NotifyElapsed(end - start);
 #else

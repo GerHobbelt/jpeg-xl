@@ -595,7 +595,7 @@ jxl::Status GetPixeldata(const std::vector<uint8_t>& image_data,
 #endif
 #if JPEGXL_ENABLE_JPEG
     if (jxl::extras::DecodeImageJPG(encoded, color_hints, size_constraints,
-                                    /*output_bit_depth=*/16, &ppf)) {
+                                    &ppf)) {
       return jxl::extras::Codec::kJPG;
     }
 #endif
@@ -889,6 +889,13 @@ void ProcessFlags(const jxl::extras::Codec codec,
                              "Valid "
                              "range is [-1, 100].\n";
               });
+
+  if (args->num_threads < -1) {
+    std::cerr
+        << "Invalid flag value for --num_threads: must be -1, 0 or postive."
+        << std::endl;
+    exit(EXIT_FAILURE);
+  }
   // JPEG specific options.
   if (jpeg_bytes) {
     ProcessBoolFlag(args->jpeg_reconstruction_cfl,
