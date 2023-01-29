@@ -17,7 +17,7 @@
 #include "lib/jpegli/encode.h"
 #include "lib/jpegli/error.h"
 
-#ifdef JPEGXL_ENABLE_JPEG
+#if JPEGXL_ENABLE_JPEG
 
 struct jpeg_error_mgr *jpeg_std_error(struct jpeg_error_mgr *err) {
   return jpegli_std_error(err);

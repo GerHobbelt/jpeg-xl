@@ -20,7 +20,7 @@ namespace extras {
 namespace {
 
 void MyErrorExit(j_common_ptr cinfo) {
-  jmp_buf* env = static_cast<jmp_buf*>(cinfo->client_data);
+  jmp_buf* env = static_cast<jmp_buf*>(cinfo->client_data_ref);
   (*cinfo->err->output_message)(cinfo);
   jpegli_destroy_compress(reinterpret_cast<j_compress_ptr>(cinfo));
   longjmp(*env, 1);
@@ -170,8 +170,8 @@ Status EncodeJpeg(const PackedPixelFile& ppf, const JpegSettings& jpeg_settings,
   ComputePremulAbsorb(255.0f, premul_absorb.get());
 
   const auto try_catch_block = [&]() -> bool {
-    jpeg_compress_struct cinfo;
-    jpeg_error_mgr jerr;
+    jpeg_compress_struct cinfo = {0};
+	jpeg_error_mgr jerr = {0};
     jmp_buf env;
     cinfo.err = jpegli_std_error(&jerr);
     jerr.error_exit = &MyErrorExit;
@@ -179,7 +179,7 @@ Status EncodeJpeg(const PackedPixelFile& ppf, const JpegSettings& jpeg_settings,
       if (output_buffer) free(output_buffer);
       return false;
     }
-    cinfo.client_data = static_cast<void*>(&env);
+    cinfo.client_data_ref = static_cast<void*>(&env);
     jpegli_create_compress(&cinfo);
     jpegli_mem_dest(&cinfo, &output_buffer, &output_size);
     const JxlBasicInfo& info = ppf.info;

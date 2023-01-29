@@ -147,7 +147,7 @@ void ReadExif(jpeg_decompress_struct* const cinfo,
 }
 
 void MyErrorExit(j_common_ptr cinfo) {
-  jmp_buf* env = static_cast<jmp_buf*>(cinfo->client_data);
+  jmp_buf* env = static_cast<jmp_buf*>(cinfo->client_data_ref);
   (*cinfo->err->output_message)(cinfo);
   jpeg_destroy_decompress(reinterpret_cast<j_decompress_ptr>(cinfo));
   longjmp(*env, 1);
@@ -178,10 +178,10 @@ Status DecodeImageJPG(const Span<const uint8_t> bytes,
   std::unique_ptr<JSAMPLE[]> row;
 
   const auto try_catch_block = [&]() -> bool {
-    jpeg_decompress_struct cinfo = {};
+    jpeg_decompress_struct cinfo = { 0 };
     // Setup error handling in jpeg library so we can deal with broken jpegs in
     // the fuzzer.
-    jpeg_error_mgr jerr;
+	jpeg_error_mgr jerr = { 0 };
     jmp_buf env;
     cinfo.err = jpeg_std_error(&jerr);
     jerr.error_exit = &MyErrorExit;
@@ -189,7 +189,7 @@ Status DecodeImageJPG(const Span<const uint8_t> bytes,
     if (setjmp(env)) {
       return false;
     }
-    cinfo.client_data = static_cast<void*>(&env);
+    cinfo.client_data_ref = static_cast<void*>(&env);
 
     jpeg_create_decompress(&cinfo);
     jpeg_mem_src(&cinfo, reinterpret_cast<const unsigned char*>(bytes.data()),

@@ -83,7 +83,7 @@ JpegliDataType ConvertDataType(JxlDataType type) {
 }
 
 void MyErrorExit(j_common_ptr cinfo) {
-  jmp_buf* env = static_cast<jmp_buf*>(cinfo->client_data);
+  jmp_buf* env = static_cast<jmp_buf*>(cinfo->client_data_ref);
   (*cinfo->err->output_message)(cinfo);
   jpegli_destroy_decompress(reinterpret_cast<j_decompress_ptr>(cinfo));
   longjmp(*env, 1);
@@ -127,7 +127,7 @@ Status DecodeJpeg(const std::vector<uint8_t>& compressed,
     if (setjmp(env)) {
       return false;
     }
-    cinfo.client_data = static_cast<void*>(&env);
+    cinfo.client_data_ref = static_cast<void*>(&env);
 
     jpegli_create_decompress(&cinfo);
     jpegli_mem_src(&cinfo,

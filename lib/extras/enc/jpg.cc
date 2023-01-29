@@ -235,8 +235,8 @@ Status EncodeWithLibJpeg(const PackedImage& image, const JxlBasicInfo& info,
   if (BITS_IN_JSAMPLE != 8 || sizeof(JSAMPLE) != 1) {
     return JXL_FAILURE("Only 8 bit JSAMPLE is supported.");
   }
-  jpeg_compress_struct cinfo = {};
-  jpeg_error_mgr jerr;
+  jpeg_compress_struct cinfo = {0};
+  jpeg_error_mgr jerr = {0};
   cinfo.err = jpeg_std_error(&jerr);
   jpeg_create_compress(&cinfo);
   unsigned char* buffer = nullptr;

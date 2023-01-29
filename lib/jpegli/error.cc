@@ -24,7 +24,7 @@ void ExitWithAbort(j_common_ptr cinfo) {
 
 void ExitWithLongJump(j_common_ptr cinfo) {
   (*cinfo->err->output_message)(cinfo);
-  jmp_buf* env = static_cast<jmp_buf*>(cinfo->client_data);
+  jmp_buf* env = static_cast<jmp_buf*>(cinfo->client_data_ref);
   longjmp(*env, 1);
 }
 
