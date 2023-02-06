@@ -458,7 +458,7 @@ void WriteOutput(j_compress_ptr cinfo, std::initializer_list<uint8_t> bytes) {
 }
 
 void EncodeSOF(j_compress_ptr cinfo) {
-  const uint8_t marker = cinfo->progressive_mode ? 0xc2 : 0xc0;
+  const uint8_t marker = cinfo->progressive_mode ? 0xc2 : 0xc1;
   const size_t n_comps = cinfo->num_components;
   const size_t marker_len = 8 + 3 * n_comps;
   std::vector<uint8_t> data(marker_len + 2);
@@ -573,31 +573,35 @@ void EncodeDHT(j_compress_ptr cinfo,
 }
 
 void EncodeDQT(j_compress_ptr cinfo) {
-  // TODO(szabadka) Support 16-bit values (if force_baseline was not set).
-  int marker_len = 2;
-  for (int i = 0; i < NUM_QUANT_TBLS; ++i) {
-    JQUANT_TBL* quant_table = cinfo->quant_tbl_ptrs[i];
-    if (quant_table == nullptr || quant_table->sent_table) continue;
-    marker_len += 1 + kDCTBlockSize;
-  }
-  std::vector<uint8_t> data(marker_len + 2);
+  uint8_t data[4 + NUM_QUANT_TBLS * (1 + 2 * DCTSIZE2)];  // 520 bytes
   size_t pos = 0;
   data[pos++] = 0xFF;
   data[pos++] = 0xDB;
-  data[pos++] = marker_len >> 8u;
-  data[pos++] = marker_len & 0xFFu;
+  pos += 2;  // Length will be filled in later.
   for (int i = 0; i < NUM_QUANT_TBLS; ++i) {
     JQUANT_TBL* quant_table = cinfo->quant_tbl_ptrs[i];
     if (quant_table == nullptr || quant_table->sent_table) continue;
-    data[pos++] = i;
+    int precision = 0;
+    for (size_t k = 0; k < DCTSIZE2; ++k) {
+      if (quant_table->quantval[k] > 255) precision = 1;
+    }
+    data[pos++] = (precision << 4) + i;
     for (size_t j = 0; j < DCTSIZE2; ++j) {
       int val_idx = kJPEGNaturalOrder[j];
       int val = quant_table->quantval[val_idx];
+      if (val == 0) {
+        JPEGLI_ERROR("Invalid quantval 0.");
+      }
+      if (precision) {
+        data[pos++] = val >> 8;
+      }
       data[pos++] = val & 0xFFu;
     }
     quant_table->sent_table = TRUE;
   }
-  WriteOutput(cinfo, data);
+  data[2] = (pos - 2) >> 8u;
+  data[3] = (pos - 2) & 0xFFu;
+  WriteOutput(cinfo, data, pos);
 }
 
 bool EncodeDRI(j_compress_ptr cinfo) {
@@ -618,7 +622,7 @@ bool EncodeScan(j_compress_ptr cinfo,
   JpegBitWriter bw;
   JpegBitWriterInit(&bw, cinfo);
 
-  coeff_t last_dc_coeff[kMaxComponents] = {0};
+  coeff_t last_dc_coeff[MAX_COMPS_IN_SCAN] = {0};
   DCTCodingState coding_state;
   DCTCodingStateInit(&coding_state);
 
@@ -676,12 +680,12 @@ bool EncodeScan(j_compress_ptr cinfo,
             bool ok;
             if (!is_progressive) {
               ok = EncodeDCTBlockSequential(block, dc_huff, ac_huff,
-                                            num_zero_runs,
-                                            last_dc_coeff + comp_idx, &bw);
+                                            num_zero_runs, last_dc_coeff + i,
+                                            &bw);
             } else if (Ah == 0) {
               ok = EncodeDCTBlockProgressive(block, dc_huff, ac_huff, Ss, Se,
                                              Al, num_zero_runs, &coding_state,
-                                             last_dc_coeff + comp_idx, &bw);
+                                             last_dc_coeff + i, &bw);
             } else {
               ok = EncodeRefinementBits(block, ac_huff, Ss, Se, Al,
                                         &coding_state, &bw);

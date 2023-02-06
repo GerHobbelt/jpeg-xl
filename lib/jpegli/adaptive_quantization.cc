@@ -19,11 +19,12 @@
 #include <hwy/foreach_target.h>
 #include <hwy/highway.h>
 
-#include "lib/jpegli/common_internal.h"
+#include "lib/jpegli/encode_internal.h"
 #include "lib/jxl/base/compiler_specific.h"
 #include "lib/jxl/base/data_parallel.h"
 #include "lib/jxl/base/status.h"
 #include "lib/jxl/image.h"
+#include "lib/jxl/image_ops.h"
 HWY_BEFORE_NAMESPACE();
 namespace jpegli {
 namespace HWY_NAMESPACE {
@@ -643,6 +644,32 @@ jxl::ImageF InitialQuantField(const float butteraugli_target,
   const float quant_ac = kAcQuant / butteraugli_target;
   return HWY_DYNAMIC_DISPATCH(AdaptiveQuantizationMap)(
       butteraugli_target, opsin_y, quant_ac * rescale, pool);
+}
+
+void ComputeAdaptiveQuantField(j_compress_ptr cinfo) {
+  jpeg_comp_master* m = cinfo->master;
+  m->quant_field.Allocate(m->ysize_blocks, m->xsize_blocks);
+  if (m->use_adaptive_quantization) {
+    int y_channel = cinfo->jpeg_color_space == JCS_RGB && m->xyb_mode ? 1 : 0;
+    jxl::ImageF input(m->xsize_blocks * DCTSIZE, m->ysize_blocks * DCTSIZE);
+    for (size_t y = 0; y < input.ysize(); ++y) {
+      memcpy(input.Row(y), m->input_buffer[y_channel].Row(y),
+             input.xsize() * sizeof(float));
+    }
+    jxl::ImageF qf =
+        jpegli::InitialQuantField(m->distance, input, nullptr, m->distance);
+    float qfmin;
+    ImageMinMax(qf, &qfmin, &m->quant_field_max);
+    for (size_t y = 0; y < m->ysize_blocks; ++y) {
+      m->quant_field.CopyRow(y, qf.Row(y), m->xsize_blocks);
+    }
+  } else {
+    constexpr float kDefaultQuantFieldMax = 0.575f;
+    m->quant_field_max = kDefaultQuantFieldMax;
+    for (size_t y = 0; y < m->ysize_blocks; ++y) {
+      m->quant_field.FillRow(y, m->quant_field_max, m->xsize_blocks);
+    }
+  }
 }
 
 }  // namespace jpegli
