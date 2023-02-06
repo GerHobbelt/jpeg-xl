@@ -456,6 +456,24 @@ void WriteOutput(j_compress_ptr cinfo, std::initializer_list<uint8_t> bytes) {
   WriteOutput(cinfo, bytes.begin(), bytes.size());
 }
 
+void EncodeAPP0(j_compress_ptr cinfo) {
+  WriteOutput(cinfo,
+              {0xff, 0xe0, 0, 16, 'J', 'F', 'I', 'F', '\0',
+               cinfo->JFIF_major_version, cinfo->JFIF_minor_version,
+               cinfo->density_unit, static_cast<uint8_t>(cinfo->X_density >> 8),
+               static_cast<uint8_t>(cinfo->X_density & 0xff),
+               static_cast<uint8_t>(cinfo->Y_density >> 8),
+               static_cast<uint8_t>(cinfo->Y_density & 0xff), 0, 0});
+}
+
+void EncodeAPP14(j_compress_ptr cinfo) {
+  uint8_t color_transform = cinfo->jpeg_color_space == JCS_YCbCr  ? 1
+                            : cinfo->jpeg_color_space == JCS_YCCK ? 2
+                                                                  : 0;
+  WriteOutput(cinfo, {0xff, 0xee, 0, 14, 'A', 'd', 'o', 'b', 'e', 0, 100, 0, 0,
+                      0, 0, color_transform});
+}
+
 void EncodeSOF(j_compress_ptr cinfo) {
   const uint8_t marker = cinfo->progressive_mode ? 0xc2 : 0xc1;
   const size_t n_comps = cinfo->num_components;
@@ -498,9 +516,6 @@ void EncodeSOS(j_compress_ptr cinfo, int scan_index) {
   data[pos++] = scan_info->comps_in_scan;
   for (int i = 0; i < scan_info->comps_in_scan; ++i) {
     int comp_idx = scan_info->component_index[i];
-    if (comp_idx >= cinfo->num_components) {
-      JPEGLI_ERROR("Invalid scan component index %u.", comp_idx);
-    }
     data[pos++] = cinfo->comp_info[comp_idx].component_id;
     data[pos++] = (sci.dc_tbl_idx[i] << 4u) + sci.ac_tbl_idx[i];
   }

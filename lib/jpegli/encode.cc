@@ -60,6 +60,7 @@ void InitializeCompressParams(j_compress_ptr cinfo) {
   cinfo->dct_method = JDCT_FLOAT;
   cinfo->restart_interval = 0;
   cinfo->restart_in_rows = 0;
+  cinfo->write_JFIF_header = false;
   cinfo->JFIF_major_version = 1;
   cinfo->JFIF_minor_version = 1;
   cinfo->density_unit = 0;
@@ -137,6 +138,14 @@ void ColorTransform(j_compress_ptr cinfo) {
       for (size_t y = 0; y < cinfo->image_height; ++y) {
         RGBToYCbCr(m->input_buffer[0].Row(y), m->input_buffer[1].Row(y),
                    m->input_buffer[2].Row(y), cinfo->image_width);
+      }
+    }
+  } else if (cinfo->jpeg_color_space == JCS_YCCK) {
+    if (cinfo->in_color_space == JCS_CMYK) {
+      for (size_t y = 0; y < cinfo->image_height; ++y) {
+        CMYKToYCCK(m->input_buffer[0].Row(y), m->input_buffer[1].Row(y),
+                   m->input_buffer[2].Row(y), m->input_buffer[3].Row(y),
+                   cinfo->image_width);
       }
     }
   } else {
@@ -217,6 +226,77 @@ void SetDefaultScanScript(j_compress_ptr cinfo) {
   cinfo->num_scans = cinfo->script_space_size;
 }
 
+void ValidateScanScript(j_compress_ptr cinfo) {
+  // Mask of coefficient bits defined by the scan script, for each component
+  // and coefficient index.
+  uint16_t comp_mask[kMaxComponents][DCTSIZE2] = {};
+  static constexpr int kMaxRefinementBit = 10;
+
+  for (int i = 0; i < cinfo->num_scans; ++i) {
+    const jpeg_scan_info& si = cinfo->scan_info[i];
+    if (si.comps_in_scan < 1 || si.comps_in_scan > MAX_COMPS_IN_SCAN) {
+      JPEGLI_ERROR("Invalid number of components in scan %d", si.comps_in_scan);
+    }
+    int last_ci = -1;
+    for (int j = 0; j < si.comps_in_scan; ++j) {
+      int ci = si.component_index[j];
+      if (ci < 0 || ci >= cinfo->num_components) {
+        JPEGLI_ERROR("Invalid component index %d in scan", ci);
+      } else if (ci == last_ci) {
+        JPEGLI_ERROR("Duplicate component index %d in scan", ci);
+      } else if (ci < last_ci) {
+        JPEGLI_ERROR("Out of order component index %d in scan", ci);
+      }
+      last_ci = ci;
+    }
+    if (si.Ss < 0 || si.Se < si.Ss || si.Se >= DCTSIZE2) {
+      JPEGLI_ERROR("Invalid spectral range %d .. %d in scan", si.Ss, si.Se);
+    }
+    if (si.Ah < 0 || si.Al < 0 || si.Al > kMaxRefinementBit) {
+      JPEGLI_ERROR("Invalid refinement bits %d/%d", si.Ah, si.Al);
+    }
+    if (!cinfo->progressive_mode) {
+      if (si.Ss != 0 || si.Se != DCTSIZE2 - 1 || si.Ah != 0 || si.Al != 0) {
+        JPEGLI_ERROR("Invalid scan for sequential mode");
+      }
+    } else {
+      if (si.Ss == 0 && si.Se != 0) {
+        JPEGLI_ERROR("DC and AC together in progressive scan");
+      }
+    }
+    if (si.Ss != 0 && si.comps_in_scan != 1) {
+      JPEGLI_ERROR("Interleaved AC only scan.");
+    }
+    for (int j = 0; j < si.comps_in_scan; ++j) {
+      int ci = si.component_index[j];
+      if (si.Ss != 0 && comp_mask[ci][0] == 0) {
+        JPEGLI_ERROR("AC before DC in component %d of scan", ci);
+      }
+      for (int k = si.Ss; k <= si.Se; ++k) {
+        if (comp_mask[ci][k] == 0) {
+          if (si.Ah != 0) {
+            JPEGLI_ERROR("Invalid first scan refinement bit");
+          }
+          comp_mask[ci][k] = ((0xffff << si.Al) & 0xffff);
+        } else {
+          if (comp_mask[ci][k] != ((0xffff << si.Ah) & 0xffff) ||
+              si.Al != si.Ah - 1) {
+            JPEGLI_ERROR("Invalid refinement bit progression.");
+          }
+          comp_mask[ci][k] |= 1 << si.Al;
+        }
+      }
+    }
+  }
+  for (int c = 0; c < cinfo->num_components; ++c) {
+    for (int k = 0; k < DCTSIZE2; ++k) {
+      if (comp_mask[c][k] != 0xffff) {
+        JPEGLI_ERROR("Incomplete scan of component %d and frequency %d", c, k);
+      }
+    }
+  }
+}
+
 }  // namespace jpegli
 
 void jpegli_CreateCompress(j_compress_ptr cinfo, int version,
@@ -248,7 +328,6 @@ void jpegli_CreateCompress(j_compress_ptr cinfo, int version,
   memset(cinfo->arith_dc_L, 0, sizeof(cinfo->arith_dc_L));
   memset(cinfo->arith_dc_U, 0, sizeof(cinfo->arith_dc_U));
   memset(cinfo->arith_ac_K, 0, sizeof(cinfo->arith_ac_K));
-  cinfo->write_JFIF_header = false;
   cinfo->write_Adobe_marker = false;
   jpegli::InitializeCompressParams(cinfo);
   cinfo->master = new jpeg_comp_master;
@@ -263,26 +342,42 @@ void jpegli_set_defaults(j_compress_ptr cinfo) {
   CheckState(cinfo, jpegli::kEncStart);
   jpegli::InitializeCompressParams(cinfo);
   jpegli_default_colorspace(cinfo);
+  jpegli_set_progressive_level(cinfo, jpegli::kDefaultProgressiveLevel);
 }
 
 void jpegli_default_colorspace(j_compress_ptr cinfo) {
   CheckState(cinfo, jpegli::kEncStart);
-  if (cinfo->in_color_space > JCS_YCbCr) {
-    JPEGLI_ERROR("Unsupported colorspace %d", cinfo->in_color_space);
+  switch (cinfo->in_color_space) {
+    case JCS_GRAYSCALE:
+      jpegli_set_colorspace(cinfo, JCS_GRAYSCALE);
+      break;
+    case JCS_RGB: {
+      if (cinfo->master->xyb_mode) {
+        jpegli_set_colorspace(cinfo, JCS_RGB);
+      } else {
+        jpegli_set_colorspace(cinfo, JCS_YCbCr);
+      }
+      break;
+    }
+    case JCS_YCbCr:
+      jpegli_set_colorspace(cinfo, JCS_YCbCr);
+      break;
+    case JCS_CMYK:
+      jpegli_set_colorspace(cinfo, JCS_CMYK);
+      break;
+    case JCS_YCCK:
+      jpegli_set_colorspace(cinfo, JCS_YCCK);
+      break;
+    case JCS_UNKNOWN:
+      jpegli_set_colorspace(cinfo, JCS_UNKNOWN);
+      break;
+    default:
+      JPEGLI_ERROR("Unsupported input colorspace %d", cinfo->in_color_space);
   }
-  J_COLOR_SPACE in_color = cinfo->in_color_space;
-  J_COLOR_SPACE out_color = in_color;
-  if (in_color == JCS_RGB && !cinfo->master->xyb_mode) {
-    out_color = JCS_YCbCr;
-  }
-  jpegli_set_colorspace(cinfo, out_color);
 }
 
 void jpegli_set_colorspace(j_compress_ptr cinfo, J_COLOR_SPACE colorspace) {
   CheckState(cinfo, jpegli::kEncStart);
-  if (colorspace > JCS_YCbCr) {
-    JPEGLI_ERROR("Unsupported colorspace %d", colorspace);
-  }
   cinfo->jpeg_color_space = colorspace;
   switch (colorspace) {
     case JCS_GRAYSCALE:
@@ -292,10 +387,19 @@ void jpegli_set_colorspace(j_compress_ptr cinfo, J_COLOR_SPACE colorspace) {
     case JCS_YCbCr:
       cinfo->num_components = 3;
       break;
-    default:
+    case JCS_CMYK:
+    case JCS_YCCK:
+      cinfo->num_components = 4;
+      break;
+    case JCS_UNKNOWN:
       cinfo->num_components =
           std::min<int>(jpegli::kMaxComponents, cinfo->input_components);
+      break;
+    default:
+      JPEGLI_ERROR("Unsupported jpeg colorspace %d", colorspace);
   }
+  // Adobe marker is only needed to distinguish CMYK and YCCK JPEGs.
+  cinfo->write_Adobe_marker = (cinfo->jpeg_color_space == JCS_YCCK);
   cinfo->comp_info =
       jpegli::Allocate<jpeg_component_info>(cinfo, jpegli::kMaxComponents);
   memset(cinfo->comp_info, 0,
@@ -321,7 +425,13 @@ void jpegli_set_colorspace(j_compress_ptr cinfo, J_COLOR_SPACE colorspace) {
       cinfo->comp_info[1].quant_tbl_no = 1;
       cinfo->comp_info[2].quant_tbl_no = 2;
     }
+  } else if (colorspace == JCS_CMYK) {
+    cinfo->comp_info[0].component_id = 'C';
+    cinfo->comp_info[1].component_id = 'M';
+    cinfo->comp_info[2].component_id = 'Y';
+    cinfo->comp_info[3].component_id = 'K';
   } else if (colorspace == JCS_YCbCr || colorspace == JCS_YCCK) {
+    // Use separate quantization tables for luma and chroma
     cinfo->comp_info[1].quant_tbl_no = 1;
     cinfo->comp_info[2].quant_tbl_no = 1;
   }
@@ -391,7 +501,7 @@ void jpegli_enable_adaptive_quantization(j_compress_ptr cinfo, boolean value) {
 
 void jpegli_simple_progression(j_compress_ptr cinfo) {
   CheckState(cinfo, jpegli::kEncStart);
-  jpegli_set_progressive_level(cinfo, 2);
+  jpegli_set_progressive_level(cinfo, jpegli::kDefaultProgressiveLevel);
 }
 
 void jpegli_set_progressive_level(j_compress_ptr cinfo, int level) {
@@ -425,12 +535,19 @@ void jpegli_start_compress(j_compress_ptr cinfo, boolean write_all_tables) {
   if (cinfo->data_precision != jpegli::kJpegPrecision) {
     JPEGLI_ERROR("Invalid data precision");
   }
+  if (cinfo->arith_code) {
+    JPEGLI_ERROR("Arithmetic coding is not implemented.");
+  }
+  if (cinfo->CCIR601_sampling) {
+    JPEGLI_ERROR("CCIR601 sampling is not implemented.");
+  }
   cinfo->global_state = jpegli::kEncHeader;
   jpeg_comp_master* m = cinfo->master;
   cinfo->next_scanline = 0;
   if (cinfo->scan_info != nullptr) {
     cinfo->progressive_mode =
         cinfo->scan_info->Ss != 0 || cinfo->scan_info->Se != DCTSIZE2 - 1;
+    jpegli::ValidateScanScript(cinfo);
   } else {
     cinfo->progressive_mode = cinfo->master->progressive_level > 0;
   }
@@ -611,6 +728,16 @@ void jpegli_finish_compress(j_compress_ptr cinfo) {
   // SOI
   jpegli::WriteOutput(cinfo, {0xFF, 0xD8});
 
+  // APP0
+  if (cinfo->write_JFIF_header) {
+    jpegli::EncodeAPP0(cinfo);
+  }
+
+  // APP14
+  if (cinfo->write_Adobe_marker) {
+    jpegli::EncodeAPP14(cinfo);
+  }
+
   // APPn, COM
   for (const auto& v : cinfo->master->special_markers) {
     jpegli::WriteOutput(cinfo, v);
@@ -628,6 +755,10 @@ void jpegli_finish_compress(j_compress_ptr cinfo) {
 
   if (cinfo->scan_info == nullptr) {
     jpegli::SetDefaultScanScript(cinfo);
+    // This should never fail since we are generating the scan script above, but
+    // if there is a bug in the scan script generation code, it is better to
+    // fail here than to create a corrupt JPEG file.
+    jpegli::ValidateScanScript(cinfo);
   }
 
   std::vector<jpegli::JPEGHuffmanCode> huffman_codes;
@@ -647,6 +778,7 @@ void jpegli_finish_compress(j_compress_ptr cinfo) {
       JPEGLI_ERROR("Failed to encode scan.");
     }
   }
+
   // EOI
   jpegli::WriteOutput(cinfo, {0xFF, 0xD9});
   (*cinfo->dest->term_destination)(cinfo);

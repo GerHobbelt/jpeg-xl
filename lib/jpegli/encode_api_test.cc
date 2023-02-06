@@ -105,6 +105,8 @@ struct TestConfig {
   int v_sampling[kMaxComponents] = {1, 1, 1};
   bool custom_component_ids = false;
   int comp_id[kMaxComponents];
+  int override_JFIF = -1;
+  int override_Adobe = -1;
   int progressive_id = 0;
   int progressive_level = -1;
   int restart_interval = 0;
@@ -119,6 +121,8 @@ void SetNumChannels(J_COLOR_SPACE colorspace, size_t* channels) {
     *channels = 1;
   } else if (colorspace == JCS_RGB || colorspace == JCS_YCbCr) {
     *channels = 3;
+  } else if (colorspace == JCS_CMYK || colorspace == JCS_YCCK) {
+    *channels = 4;
   } else if (colorspace == JCS_UNKNOWN) {
     ASSERT_LE(*channels, jpegli::kMaxComponents);
   } else {
@@ -128,12 +132,13 @@ void SetNumChannels(J_COLOR_SPACE colorspace, size_t* channels) {
 
 void ConvertPixel(const uint8_t* input_rgb, uint8_t* out,
                   J_COLOR_SPACE colorspace, size_t num_channels) {
-  const float r = input_rgb[0];
-  const float g = input_rgb[1];
-  const float b = input_rgb[2];
+  const float kMul = 255.0f;
+  const float r = input_rgb[0] / kMul;
+  const float g = input_rgb[1] / kMul;
+  const float b = input_rgb[2] / kMul;
   if (colorspace == JCS_GRAYSCALE) {
     const float Y = 0.299f * r + 0.587f * g + 0.114f * b;
-    out[0] = static_cast<uint8_t>(std::round(Y));
+    out[0] = static_cast<uint8_t>(std::round(Y * kMul));
   } else if (colorspace == JCS_RGB || colorspace == JCS_UNKNOWN) {
     for (size_t c = 0; c < num_channels; ++c) {
       size_t copy_channels = std::min<size_t>(3, num_channels - c);
@@ -143,9 +148,19 @@ void ConvertPixel(const uint8_t* input_rgb, uint8_t* out,
     float Y = 0.299f * r + 0.587f * g + 0.114f * b;
     float Cb = -0.168736f * r - 0.331264f * g + 0.5f * b + 128.0f;
     float Cr = 0.5f * r - 0.418688f * g - 0.081312f * b + 128.0f;
-    out[0] = static_cast<uint8_t>(std::round(Y));
-    out[1] = static_cast<uint8_t>(std::round(Cb));
-    out[2] = static_cast<uint8_t>(std::round(Cr));
+    out[0] = static_cast<uint8_t>(std::round(Y * kMul));
+    out[1] = static_cast<uint8_t>(std::round(Cb * kMul));
+    out[2] = static_cast<uint8_t>(std::round(Cr * kMul));
+  } else if (colorspace == JCS_CMYK) {
+    float K = 1.0f - std::max(r, std::max(g, b));
+    float scaleK = 1.0f / (1.0f - K);
+    float C = (1.0f - K - r) * scaleK;
+    float M = (1.0f - K - g) * scaleK;
+    float Y = (1.0f - K - b) * scaleK;
+    out[0] = static_cast<uint8_t>(std::round(C * kMul));
+    out[1] = static_cast<uint8_t>(std::round(M * kMul));
+    out[2] = static_cast<uint8_t>(std::round(Y * kMul));
+    out[3] = static_cast<uint8_t>(std::round(K * kMul));
   } else {
     JXL_ABORT("Colorspace %d not supported", colorspace);
   }
@@ -207,6 +222,12 @@ void TestDecodedImage(const TestConfig& config,
   EXPECT_EQ(config.input_components, cinfo.num_components);
   cinfo.buffered_image = TRUE;
   cinfo.out_color_space = config.in_color_space;
+  if (config.override_JFIF >= 0) {
+    EXPECT_EQ(cinfo.saw_JFIF_marker, config.override_JFIF);
+  }
+  if (config.override_Adobe >= 0) {
+    EXPECT_EQ(cinfo.saw_Adobe_marker, config.override_Adobe);
+  }
   if (config.in_color_space == JCS_UNKNOWN) {
     cinfo.jpeg_color_space = JCS_UNKNOWN;
   }
@@ -322,6 +343,12 @@ bool EncodeWithJpegli(const TestConfig& config,
     jpegli_set_xyb_mode(&cinfo);
   }
   jpegli_set_defaults(&cinfo);
+  if (config.override_JFIF >= 0) {
+    cinfo.write_JFIF_header = config.override_JFIF;
+  }
+  if (config.override_Adobe >= 0) {
+    cinfo.write_Adobe_marker = config.override_Adobe;
+  }
   if (config.set_jpeg_colorspace) {
     jpegli_set_colorspace(&cinfo, config.jpeg_color_space);
   }
@@ -497,6 +524,18 @@ std::vector<TestConfig> GenerateTests() {
     config.max_dist = 1.4;
     all_tests.push_back(config);
   }
+  {
+    TestConfig config;
+    config.in_color_space = JCS_CMYK;
+    config.max_bpp = 3.75;
+    config.max_dist = 1.4;
+    all_tests.push_back(config);
+    config.set_jpeg_colorspace = true;
+    config.jpeg_color_space = JCS_YCCK;
+    config.max_bpp = 3.2;
+    config.max_dist = 1.7;
+    all_tests.push_back(config);
+  }
   for (int channels = 1; channels <= jpegli::kMaxComponents; ++channels) {
     TestConfig config;
     config.in_color_space = JCS_UNKNOWN;
@@ -642,6 +681,19 @@ std::vector<TestConfig> GenerateTests() {
     config.max_dist = 2.2;
     all_tests.push_back(config);
   }
+  {
+    TestConfig config;
+    config.max_bpp = 1.45;
+    config.max_dist = 2.2;
+    config.override_JFIF = 1;
+    all_tests.push_back(config);
+    config.override_JFIF = 0;
+    config.override_Adobe = 1;
+    all_tests.push_back(config);
+    config.override_JFIF = 1;
+    config.override_Adobe = 1;
+    all_tests.push_back(config);
+  }
   return all_tests;
 };
 
@@ -655,6 +707,8 @@ std::string ColorSpaceName(J_COLOR_SPACE colorspace) {
       return "RGB";
     case JCS_YCbCr:
       return "YCbCr";
+    case JCS_CMYK:
+      return "CMYK";
     default:
       return "";
   }
@@ -708,6 +762,12 @@ std::ostream& operator<<(std::ostream& os, const TestConfig& c) {
     os << "XYB";
   } else if (c.libjpeg_mode) {
     os << "Libjpeg";
+  }
+  if (c.override_JFIF >= 0) {
+    os << (c.override_JFIF ? "AddJFIF" : "NoJFIF");
+  }
+  if (c.override_Adobe >= 0) {
+    os << (c.override_JFIF ? "AddAdobe" : "NoAdobe");
   }
   return os;
 }
@@ -1090,10 +1150,6 @@ TEST(ErrorHandlingTest, DuplicateComponentIds) {
   cinfo.comp_info[0].component_id = 0;
   cinfo.comp_info[1].component_id = 0;
   jpegli_start_compress(&cinfo, TRUE);
-  JSAMPLE image[3] = {0};
-  JSAMPROW row[] = {image};
-  jpegli_write_scanlines(&cinfo, row, 1);
-  jpegli_finish_compress(&cinfo);
   EXPECT_FAILURE();
 }
 
@@ -1109,10 +1165,272 @@ TEST(ErrorHandlingTest, InvalidComponentIndex) {
   jpegli_set_defaults(&cinfo);
   cinfo.comp_info[0].component_index = 17;
   jpegli_start_compress(&cinfo, TRUE);
-  JSAMPLE image[3] = {0};
-  JSAMPROW row[] = {image};
-  jpegli_write_scanlines(&cinfo, row, 1);
-  jpegli_finish_compress(&cinfo);
+  EXPECT_FAILURE();
+}
+
+TEST(ErrorHandlingTest, ArithmeticCoding) {
+  MyClientData data;
+  jpeg_compress_struct cinfo;
+  ERROR_HANDLER_SETUP(return );
+  jpegli_create_compress(&cinfo);
+  jpegli_mem_dest(&cinfo, &data.buffer, &data.size);
+  cinfo.image_width = 1;
+  cinfo.image_height = 1;
+  cinfo.input_components = 3;
+  jpegli_set_defaults(&cinfo);
+  cinfo.arith_code = TRUE;
+  jpegli_start_compress(&cinfo, TRUE);
+  EXPECT_FAILURE();
+}
+
+TEST(ErrorHandlingTest, CCIR601Sampling) {
+  MyClientData data;
+  jpeg_compress_struct cinfo;
+  ERROR_HANDLER_SETUP(return );
+  jpegli_create_compress(&cinfo);
+  jpegli_mem_dest(&cinfo, &data.buffer, &data.size);
+  cinfo.image_width = 1;
+  cinfo.image_height = 1;
+  cinfo.input_components = 3;
+  jpegli_set_defaults(&cinfo);
+  cinfo.CCIR601_sampling = TRUE;
+  jpegli_start_compress(&cinfo, TRUE);
+  EXPECT_FAILURE();
+}
+
+TEST(ErrorHandlingTest, InvalidScanScript1) {
+  MyClientData data;
+  jpeg_compress_struct cinfo;
+  ERROR_HANDLER_SETUP(return );
+  jpegli_create_compress(&cinfo);
+  jpegli_mem_dest(&cinfo, &data.buffer, &data.size);
+  cinfo.image_width = 1;
+  cinfo.image_height = 1;
+  cinfo.input_components = 1;
+  jpegli_set_defaults(&cinfo);
+  static constexpr jpeg_scan_info kScript[] = {{1, {0}, 0, 63, 0, 0}};  //
+  cinfo.scan_info = kScript;
+  cinfo.num_scans = 0;
+  jpegli_start_compress(&cinfo, TRUE);
+  EXPECT_FAILURE();
+}
+
+TEST(ErrorHandlingTest, InvalidScanScript2) {
+  MyClientData data;
+  jpeg_compress_struct cinfo;
+  ERROR_HANDLER_SETUP(return );
+  jpegli_create_compress(&cinfo);
+  jpegli_mem_dest(&cinfo, &data.buffer, &data.size);
+  cinfo.image_width = 1;
+  cinfo.image_height = 1;
+  cinfo.input_components = 1;
+  jpegli_set_defaults(&cinfo);
+  static constexpr jpeg_scan_info kScript[] = {{2, {0, 1}, 0, 63, 0, 0}};  //
+  cinfo.scan_info = kScript;
+  cinfo.num_scans = ARRAYSIZE(kScript);
+  jpegli_start_compress(&cinfo, TRUE);
+  EXPECT_FAILURE();
+}
+
+TEST(ErrorHandlingTest, InvalidScanScript3) {
+  MyClientData data;
+  jpeg_compress_struct cinfo;
+  ERROR_HANDLER_SETUP(return );
+  jpegli_create_compress(&cinfo);
+  jpegli_mem_dest(&cinfo, &data.buffer, &data.size);
+  cinfo.image_width = 1;
+  cinfo.image_height = 1;
+  cinfo.input_components = 1;
+  jpegli_set_defaults(&cinfo);
+  static constexpr jpeg_scan_info kScript[] = {{5, {0}, 0, 63, 0, 0}};  //
+  cinfo.scan_info = kScript;
+  cinfo.num_scans = ARRAYSIZE(kScript);
+  jpegli_start_compress(&cinfo, TRUE);
+  EXPECT_FAILURE();
+}
+
+TEST(ErrorHandlingTest, InvalidScanScript4) {
+  MyClientData data;
+  jpeg_compress_struct cinfo;
+  ERROR_HANDLER_SETUP(return );
+  jpegli_create_compress(&cinfo);
+  jpegli_mem_dest(&cinfo, &data.buffer, &data.size);
+  cinfo.image_width = 1;
+  cinfo.image_height = 1;
+  cinfo.input_components = 2;
+  jpegli_set_defaults(&cinfo);
+  static constexpr jpeg_scan_info kScript[] = {{2, {0, 0}, 0, 63, 0, 0}};  //
+  cinfo.scan_info = kScript;
+  cinfo.num_scans = ARRAYSIZE(kScript);
+  jpegli_start_compress(&cinfo, TRUE);
+  EXPECT_FAILURE();
+}
+
+TEST(ErrorHandlingTest, InvalidScanScript5) {
+  MyClientData data;
+  jpeg_compress_struct cinfo;
+  ERROR_HANDLER_SETUP(return );
+  jpegli_create_compress(&cinfo);
+  jpegli_mem_dest(&cinfo, &data.buffer, &data.size);
+  cinfo.image_width = 1;
+  cinfo.image_height = 1;
+  cinfo.input_components = 2;
+  jpegli_set_defaults(&cinfo);
+  static constexpr jpeg_scan_info kScript[] = {{2, {1, 0}, 0, 63, 0, 0}};  //
+  cinfo.scan_info = kScript;
+  cinfo.num_scans = ARRAYSIZE(kScript);
+  jpegli_start_compress(&cinfo, TRUE);
+  EXPECT_FAILURE();
+}
+
+TEST(ErrorHandlingTest, InvalidScanScript6) {
+  MyClientData data;
+  jpeg_compress_struct cinfo;
+  ERROR_HANDLER_SETUP(return );
+  jpegli_create_compress(&cinfo);
+  jpegli_mem_dest(&cinfo, &data.buffer, &data.size);
+  cinfo.image_width = 1;
+  cinfo.image_height = 1;
+  cinfo.input_components = 1;
+  jpegli_set_defaults(&cinfo);
+  static constexpr jpeg_scan_info kScript[] = {{1, {0}, 0, 64, 0, 0}};  //
+  cinfo.scan_info = kScript;
+  cinfo.num_scans = ARRAYSIZE(kScript);
+  jpegli_start_compress(&cinfo, TRUE);
+  EXPECT_FAILURE();
+}
+
+TEST(ErrorHandlingTest, InvalidScanScript7) {
+  MyClientData data;
+  jpeg_compress_struct cinfo;
+  ERROR_HANDLER_SETUP(return );
+  jpegli_create_compress(&cinfo);
+  jpegli_mem_dest(&cinfo, &data.buffer, &data.size);
+  cinfo.image_width = 1;
+  cinfo.image_height = 1;
+  cinfo.input_components = 1;
+  jpegli_set_defaults(&cinfo);
+  static constexpr jpeg_scan_info kScript[] = {{1, {0}, 2, 1, 0, 0}};  //
+  cinfo.scan_info = kScript;
+  cinfo.num_scans = ARRAYSIZE(kScript);
+  jpegli_start_compress(&cinfo, TRUE);
+  EXPECT_FAILURE();
+}
+
+TEST(ErrorHandlingTest, InvalidScanScript8) {
+  MyClientData data;
+  jpeg_compress_struct cinfo;
+  ERROR_HANDLER_SETUP(return );
+  jpegli_create_compress(&cinfo);
+  jpegli_mem_dest(&cinfo, &data.buffer, &data.size);
+  cinfo.image_width = 1;
+  cinfo.image_height = 1;
+  cinfo.input_components = 2;
+  jpegli_set_defaults(&cinfo);
+  static constexpr jpeg_scan_info kScript[] = {
+      {1, {0}, 0, 63, 0, 0}, {1, {1}, 0, 0, 0, 0}, {1, {1}, 1, 63, 0, 0}  //
+  };
+  cinfo.scan_info = kScript;
+  cinfo.num_scans = ARRAYSIZE(kScript);
+  jpegli_start_compress(&cinfo, TRUE);
+  EXPECT_FAILURE();
+}
+
+TEST(ErrorHandlingTest, InvalidScanScript9) {
+  MyClientData data;
+  jpeg_compress_struct cinfo;
+  ERROR_HANDLER_SETUP(return );
+  jpegli_create_compress(&cinfo);
+  jpegli_mem_dest(&cinfo, &data.buffer, &data.size);
+  cinfo.image_width = 1;
+  cinfo.image_height = 1;
+  cinfo.input_components = 1;
+  jpegli_set_defaults(&cinfo);
+  static constexpr jpeg_scan_info kScript[] = {
+      {1, {0}, 0, 1, 0, 0}, {1, {0}, 2, 63, 0, 0},  //
+  };
+  cinfo.scan_info = kScript;
+  cinfo.num_scans = ARRAYSIZE(kScript);
+  jpegli_start_compress(&cinfo, TRUE);
+  EXPECT_FAILURE();
+}
+
+TEST(ErrorHandlingTest, InvalidScanScript10) {
+  MyClientData data;
+  jpeg_compress_struct cinfo;
+  ERROR_HANDLER_SETUP(return );
+  jpegli_create_compress(&cinfo);
+  jpegli_mem_dest(&cinfo, &data.buffer, &data.size);
+  cinfo.image_width = 1;
+  cinfo.image_height = 1;
+  cinfo.input_components = 2;
+  jpegli_set_defaults(&cinfo);
+  static constexpr jpeg_scan_info kScript[] = {
+      {2, {0, 1}, 0, 0, 0, 0}, {2, {0, 1}, 1, 63, 0, 0}  //
+  };
+  cinfo.scan_info = kScript;
+  cinfo.num_scans = ARRAYSIZE(kScript);
+  jpegli_start_compress(&cinfo, TRUE);
+  EXPECT_FAILURE();
+}
+
+TEST(ErrorHandlingTest, InvalidScanScript11) {
+  MyClientData data;
+  jpeg_compress_struct cinfo;
+  ERROR_HANDLER_SETUP(return );
+  jpegli_create_compress(&cinfo);
+  jpegli_mem_dest(&cinfo, &data.buffer, &data.size);
+  cinfo.image_width = 1;
+  cinfo.image_height = 1;
+  cinfo.input_components = 1;
+  jpegli_set_defaults(&cinfo);
+  static constexpr jpeg_scan_info kScript[] = {
+      {1, {0}, 1, 63, 0, 0}, {1, {0}, 0, 0, 0, 0}  //
+  };
+  cinfo.scan_info = kScript;
+  cinfo.num_scans = ARRAYSIZE(kScript);
+  jpegli_start_compress(&cinfo, TRUE);
+  EXPECT_FAILURE();
+}
+
+TEST(ErrorHandlingTest, InvalidScanScript12) {
+  MyClientData data;
+  jpeg_compress_struct cinfo;
+  ERROR_HANDLER_SETUP(return );
+  jpegli_create_compress(&cinfo);
+  jpegli_mem_dest(&cinfo, &data.buffer, &data.size);
+  cinfo.image_width = 1;
+  cinfo.image_height = 1;
+  cinfo.input_components = 1;
+  jpegli_set_defaults(&cinfo);
+  static constexpr jpeg_scan_info kScript[] = {
+      {1, {0}, 0, 0, 10, 1}, {1, {0}, 0, 0, 1, 0}, {1, {0}, 1, 63, 0, 0}  //
+  };
+  cinfo.scan_info = kScript;
+  cinfo.num_scans = ARRAYSIZE(kScript);
+  jpegli_start_compress(&cinfo, TRUE);
+  EXPECT_FAILURE();
+}
+
+TEST(ErrorHandlingTest, InvalidScanScript13) {
+  MyClientData data;
+  jpeg_compress_struct cinfo;
+  ERROR_HANDLER_SETUP(return );
+  jpegli_create_compress(&cinfo);
+  jpegli_mem_dest(&cinfo, &data.buffer, &data.size);
+  cinfo.image_width = 1;
+  cinfo.image_height = 1;
+  cinfo.input_components = 1;
+  jpegli_set_defaults(&cinfo);
+  static constexpr jpeg_scan_info kScript[] = {
+      {1, {0}, 0, 0, 0, 2},
+      {1, {0}, 0, 0, 1, 0},
+      {1, {0}, 0, 0, 2, 1},  //
+      {1, {0}, 1, 63, 0, 0}  //
+  };
+  cinfo.scan_info = kScript;
+  cinfo.num_scans = ARRAYSIZE(kScript);
+  jpegli_start_compress(&cinfo, TRUE);
   EXPECT_FAILURE();
 }
 
