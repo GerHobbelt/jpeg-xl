@@ -9,6 +9,9 @@
 # TODO(lode): further prune these files and move to JPEGXL_INTERNAL_SOURCES_ENC:
 #             only those files that the decoder absolutely needs, and or not
 #             only for encoding, should be listed here.
+
+include(compatibility.cmake)
+
 set(JPEGXL_INTERNAL_SOURCES_DEC
   jxl/ac_context.h
   jxl/ac_strategy.cc
@@ -18,9 +21,6 @@ set(JPEGXL_INTERNAL_SOURCES_DEC
   jxl/ans_common.cc
   jxl/ans_common.h
   jxl/ans_params.h
-  jxl/aux_out.cc
-  jxl/aux_out.h
-  jxl/aux_out_fwd.h
   jxl/base/arch_macros.h
   jxl/base/bits.h
   jxl/base/byte_order.h
@@ -100,8 +100,6 @@ set(JPEGXL_INTERNAL_SOURCES_DEC
   jxl/dec_xyb.cc
   jxl/dec_xyb.h
   jxl/decode.cc
-  jxl/enc_bit_writer.cc
-  jxl/enc_bit_writer.h
   jxl/entropy_coder.cc
   jxl/entropy_coder.h
   jxl/epf.cc
@@ -266,6 +264,10 @@ set(JPEGXL_INTERNAL_SOURCES_ENC
   jxl/enc_ans_params.h
   jxl/enc_ar_control_field.cc
   jxl/enc_ar_control_field.h
+  jxl/enc_aux_out.cc
+  jxl/enc_aux_out.h
+  jxl/enc_bit_writer.cc
+  jxl/enc_bit_writer.h
   jxl/enc_butteraugli_comparator.cc
   jxl/enc_butteraugli_comparator.h
   jxl/enc_butteraugli_pnorm.cc
@@ -294,6 +296,8 @@ set(JPEGXL_INTERNAL_SOURCES_ENC
   jxl/enc_external_image.h
   jxl/enc_fast_lossless.cc
   jxl/enc_fast_lossless.h
+  jxl/enc_fields.cc
+  jxl/enc_fields.h
   jxl/enc_file.cc
   jxl/enc_file.h
   jxl/enc_frame.cc
@@ -427,7 +431,7 @@ set_property(TARGET jxl_dec-obj PROPERTY POSITION_INDEPENDENT_CODE ON)
 target_include_directories(jxl_dec-obj PUBLIC
   "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}>"
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-  "$<BUILD_INTERFACE:$<TARGET_PROPERTY:$<IF:$<TARGET_EXISTS:hwy::hwy>,hwy::hwy,hwy>,INTERFACE_INCLUDE_DIRECTORIES>>"
+  "${JXL_HWY_INCLUDE_DIRS}"
   "$<BUILD_INTERFACE:$<TARGET_PROPERTY:brotlicommon,INTERFACE_INCLUDE_DIRECTORIES>>"
 )
 target_compile_definitions(jxl_dec-obj PUBLIC
@@ -445,7 +449,7 @@ set_property(TARGET jxl_enc-obj PROPERTY POSITION_INDEPENDENT_CODE ON)
 target_include_directories(jxl_enc-obj PUBLIC
   ${PROJECT_SOURCE_DIR}
   ${CMAKE_CURRENT_SOURCE_DIR}/include
-  $<TARGET_PROPERTY:$<IF:$<TARGET_EXISTS:hwy::hwy>,hwy::hwy,hwy>,INTERFACE_INCLUDE_DIRECTORIES>
+  ${JXL_HWY_INCLUDE_DIRS}
   $<TARGET_PROPERTY:brotlicommon,INTERFACE_INCLUDE_DIRECTORIES>
 )
 target_compile_definitions(jxl_enc-obj PUBLIC
