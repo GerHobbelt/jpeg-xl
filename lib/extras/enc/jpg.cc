@@ -12,6 +12,7 @@
 #include <stdint.h>
 
 #include <algorithm>
+#include <array>
 #include <iterator>
 #include <numeric>
 #include <sstream>

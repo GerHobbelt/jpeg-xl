@@ -120,7 +120,8 @@ TEST(ModularTest, RoundtripLossyDeltaPalette) {
   compressed_size = Roundtrip(&io, cparams, {}, pool, &io_out);
   EXPECT_LE(compressed_size, 6800u);
   cparams.ba_params.intensity_target = 80.0f;
-  EXPECT_THAT(ButteraugliDistance(io, io_out, cparams.ba_params, GetJxlCms(),
+  EXPECT_THAT(ButteraugliDistance(io.frames, io_out.frames, cparams.ba_params,
+                                  GetJxlCms(),
                                   /*distmap=*/nullptr, pool),
               IsSlightlyBelow(1.5));
 }
@@ -144,7 +145,8 @@ TEST(ModularTest, RoundtripLossyDeltaPaletteWP) {
   compressed_size = Roundtrip(&io, cparams, {}, pool, &io_out);
   EXPECT_LE(compressed_size, 7000u);
   cparams.ba_params.intensity_target = 80.0f;
-  EXPECT_THAT(ButteraugliDistance(io, io_out, cparams.ba_params, GetJxlCms(),
+  EXPECT_THAT(ButteraugliDistance(io.frames, io_out.frames, cparams.ba_params,
+                                  GetJxlCms(),
                                   /*distmap=*/nullptr, pool),
               IsSlightlyBelow(10.1));
 }
@@ -166,7 +168,8 @@ TEST(ModularTest, RoundtripLossy) {
   compressed_size = Roundtrip(&io, cparams, {}, pool, &io_out);
   EXPECT_LE(compressed_size, 30000u);
   cparams.ba_params.intensity_target = 80.0f;
-  EXPECT_THAT(ButteraugliDistance(io, io_out, cparams.ba_params, GetJxlCms(),
+  EXPECT_THAT(ButteraugliDistance(io.frames, io_out.frames, cparams.ba_params,
+                                  GetJxlCms(),
                                   /*distmap=*/nullptr, pool),
               IsSlightlyBelow(2.3));
 }
@@ -184,13 +187,16 @@ TEST(ModularTest, RoundtripLossy16) {
 
   CodecInOut io;
   ASSERT_TRUE(SetFromBytes(Span<const uint8_t>(orig), &io, pool));
-  JXL_CHECK(io.TransformTo(ColorEncoding::SRGB(), GetJxlCms(), pool));
+  JXL_CHECK(!io.metadata.m.have_preview);
+  JXL_CHECK(io.frames.size() == 1);
+  JXL_CHECK(io.frames[0].TransformTo(ColorEncoding::SRGB(), GetJxlCms()));
   io.metadata.m.color_encoding = ColorEncoding::SRGB();
 
   compressed_size = Roundtrip(&io, cparams, {}, pool, &io_out);
   EXPECT_LE(compressed_size, 300u);
   cparams.ba_params.intensity_target = 80.0f;
-  EXPECT_THAT(ButteraugliDistance(io, io_out, cparams.ba_params, GetJxlCms(),
+  EXPECT_THAT(ButteraugliDistance(io.frames, io_out.frames, cparams.ba_params,
+                                  GetJxlCms(),
                                   /*distmap=*/nullptr, pool),
               IsSlightlyBelow(1.6));
 }
