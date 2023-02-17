@@ -8,8 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ### Added
+ - encoder API: add `JxlEncoderSetExtraChannelDistance` to adjust the quality
+   of extra channels (like alpha) separately.
 
 ### Removed
+
+### Changed 
+ - changed the name of the cjxl flag `photon_noise` to `photon_noise_iso`
 
 ## [0.8.0] - 2022-01-18
 
