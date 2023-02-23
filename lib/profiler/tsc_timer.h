@@ -13,15 +13,17 @@
 #include <time.h>  // clock_gettime
 
 #if defined(_WIN32) || defined(_WIN64)
+#if 0
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif  // WIN32_LEAN_AND_MEAN
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif  // NOMINMAX
 #ifndef NOGDI
 #define NOGDI
 #endif  // NOGDI
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif  // NOMINMAX
 #include <windows.h>
 // Undef macros to avoid collisions
 #undef LoadFence
