@@ -237,7 +237,6 @@
     <ClInclude Include="..\lib\jxl\dec_noise.h" />
     <ClInclude Include="..\lib\jxl\dec_patch_dictionary.h" />
     <ClInclude Include="..\lib\jxl\dec_transforms-inl.h" />
-    <ClInclude Include="..\lib\jxl\dec_transforms_testonly.h" />
     <ClInclude Include="..\lib\jxl\dec_xyb-inl.h" />
     <ClInclude Include="..\lib\jxl\dec_xyb.h" />
     <ClInclude Include="..\lib\jxl\encode_internal.h" />

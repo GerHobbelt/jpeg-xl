@@ -783,9 +783,6 @@
     <ClInclude Include="..\lib\jxl\dec_cache.h">
       <Filter>Source Files\lib\jxl</Filter>
     </ClInclude>
-    <ClInclude Include="..\lib\jxl\dec_transforms_testonly.h">
-      <Filter>Source Files\lib\jxl</Filter>
-    </ClInclude>
     <ClInclude Include="..\lib\jxl\enc_aux_out.h">
       <Filter>Source Files\lib\jxl</Filter>
     </ClInclude>
