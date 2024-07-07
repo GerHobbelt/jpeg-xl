@@ -49,6 +49,8 @@
 #include "tools/file_io.h"
 #include "tools/speed_stats.h"
 
+#include "monolithic_examples.h"
+
 namespace jpegxl {
 namespace tools {
 
@@ -997,7 +999,12 @@ struct JxlOutputProcessor {
 }  // namespace tools
 }  // namespace jpegxl
 
-int main(int argc, char** argv) {
+
+#if defined(BUILD_MONOLITHIC)
+#define main(cnt, arr) jpegXL_compress_main(cnt, arr)
+#endif
+
+int main(int argc, const char** argv) {
   std::string version = jpegxl::tools::CodecConfigString(JxlEncoderVersion());
   jpegxl::tools::CompressArgs args;
   jpegxl::tools::CommandLineParser cmdline;
