@@ -46,7 +46,7 @@
 #endif
 
 #if JXL_COMPILER_MSVC
-#define JXL_INLINE __forceinline
+#define JXL_INLINE inline /* __forceinline */
 #define JXL_NOINLINE __declspec(noinline)
 #else
 #define JXL_INLINE inline __attribute__((always_inline))
