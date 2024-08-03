@@ -6,7 +6,6 @@
 #include "lib/extras/enc/exr.h"
 
 #if JPEGXL_ENABLE_EXR
-
 #include <ImfChromaticitiesAttribute.h>
 #include <ImfIO.h>
 #include <ImfRgbaFile.h>
@@ -207,5 +206,3 @@ std::unique_ptr<Encoder> GetEXREncoder() {
 
 }  // namespace extras
 }  // namespace jxl
-
-#endif

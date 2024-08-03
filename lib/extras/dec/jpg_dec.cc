@@ -6,7 +6,6 @@
 #include "lib/extras/dec/jpg.h"
 
 #if JPEGXL_ENABLE_JPEG
-
 #include "lib/jxl/base/include_jpeglib.h"  // NOLINT
 #endif
 
@@ -352,5 +351,3 @@ Status DecodeImageJPG(const Span<const uint8_t> bytes,
 
 }  // namespace extras
 }  // namespace jxl
-
-#endif

@@ -6,7 +6,6 @@
 #include "lib/extras/enc/jpg.h"
 
 #if JPEGXL_ENABLE_JPEG
-
 #include "lib/jxl/base/include_jpeglib.h"  // NOLINT
 #endif
 
@@ -613,5 +612,3 @@ std::unique_ptr<Encoder> GetJPEGEncoder() {
 
 }  // namespace extras
 }  // namespace jxl
-
-#endif

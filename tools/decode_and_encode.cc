@@ -80,5 +80,5 @@ static int Convert(int argc, const char** argv) {
  */
 
 int main(int argc, const char** argv) {
-  return jxl::Convert(argc, argv);
+  return Convert(argc, argv);
 }

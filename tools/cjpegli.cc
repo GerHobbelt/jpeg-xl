@@ -19,6 +19,8 @@
 #include "tools/file_io.h"
 #include "tools/speed_stats.h"
 
+#include "monolithic_examples.h"
+
 namespace jpegxl {
 namespace tools {
 namespace {
@@ -255,6 +257,11 @@ int CJpegliMain(int argc, const char* argv[]) {
 }  // namespace
 }  // namespace tools
 }  // namespace jpegxl
+
+
+#if defined(BUILD_MONOLITHIC)
+#define main(cnt, arr) jpegXL_cjpegli_main(cnt, arr)
+#endif
 
 int main(int argc, const char** argv) {
   return jpegxl::tools::CJpegliMain(argc, argv);

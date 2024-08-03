@@ -16,8 +16,6 @@
 #include "lib/jxl/base/span.h"
 #include "lib/jxl/base/status.h"
 
-#if JPEGXL_ENABLE_JPEG
-
 namespace jxl {
 
 struct SizeConstraints;
@@ -43,7 +41,5 @@ Status DecodeImageJPG(Span<const uint8_t> bytes, const ColorHints& color_hints,
 
 }  // namespace extras
 }  // namespace jxl
-
-#endif
 
 #endif  // LIB_EXTRAS_DEC_JPG_H_

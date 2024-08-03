@@ -41,13 +41,13 @@ bool ThreadMemoryManagerInit(JxlMemoryManager* self,
   } else {
     memset(self, 0, sizeof(*self));
   }
-  bool is_default_alloc = (self->alloc == nullptr);
-  bool is_default_free = (self->free == nullptr);
+  bool is_default_alloc = (self->_alloc == nullptr);
+  bool is_default_free = (self->_free == nullptr);
   if (is_default_alloc != is_default_free) {
     return false;
   }
-  if (is_default_alloc) self->alloc = ThreadMemoryManagerDefaultAlloc;
-  if (is_default_free) self->free = ThreadMemoryManagerDefaultFree;
+  if (is_default_alloc) self->_alloc = ThreadMemoryManagerDefaultAlloc;
+  if (is_default_free) self->_free = ThreadMemoryManagerDefaultFree;
 
   return true;
 }

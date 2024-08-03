@@ -97,7 +97,7 @@ static cmsContext GetContext() {
 	static thread_local void* context_;
 	if (context_ == nullptr) {
 		context_ = cmsCreateContext(nullptr, nullptr);
-		JXL_ASSERT(context_ != nullptr);
+		JXL_DASSERT(context_ != nullptr);
 
 		cmsSetLogErrorHandler(static_cast<cmsContext>(context_), &ErrorHandler);
 	}
@@ -771,9 +771,9 @@ Status DetectTransferFunction(const cmsContext context, const Profile& profile,
 
   float gamma = 0;
   if (const auto* gray_trc = reinterpret_cast<const cmsToneCurve*>(
-          cmsReadTag(profile.get(), cmsSigGrayTRCTag))) {
+          cmsReadTag(context, profile.get(), cmsSigGrayTRCTag))) {
     const double estimated_gamma =
-        cmsEstimateGamma(gray_trc, /*precision=*/1e-4);
+        cmsEstimateGamma(context, gray_trc, /*precision=*/1e-4);
     if (estimated_gamma > 0) {
       gamma = 1. / estimated_gamma;
     }
@@ -783,9 +783,9 @@ Status DetectTransferFunction(const cmsContext context, const Profile& profile,
     for (const auto tag :
          {cmsSigRedTRCTag, cmsSigGreenTRCTag, cmsSigBlueTRCTag}) {
       if (const auto* trc = reinterpret_cast<const cmsToneCurve*>(
-              cmsReadTag(profile.get(), tag))) {
+              cmsReadTag(context, profile.get(), tag))) {
         const double estimated_gamma =
-            cmsEstimateGamma(trc, /*precision=*/1e-4);
+            cmsEstimateGamma(context, trc, /*precision=*/1e-4);
         if (estimated_gamma > 0) {
           rgb_gamma[i] = 1. / estimated_gamma;
         }
@@ -1052,7 +1052,7 @@ JXL_BOOL JxlCmsSetFieldsFromICC(void* user_data, const uint8_t* icc_data,
       DecodeProfile(context, Bytes(icc_data, icc_size), &profile));
 
   const cmsUInt32Number rendering_intent32 =
-      cmsGetHeaderRenderingIntent(profile.get());
+      cmsGetHeaderRenderingIntent(context, profile.get());
   if (rendering_intent32 > 3) {
     return JXL_FAILURE("Invalid rendering intent %u\n", rendering_intent32);
   }

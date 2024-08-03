@@ -30,7 +30,7 @@ using ::jxl::Image3F;
 #endif
 
 int main(int argc, const char** argv) {
-  jxl::ThreadPoolInternal pool;
+  jpegxl::tools::ThreadPoolInternal pool;
 
   jpegxl::tools::CommandLineParser parser;
   size_t N = 64;

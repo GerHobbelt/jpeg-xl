@@ -11,8 +11,6 @@
 
 #include <string>
 
-#include "lib/jxl/sanitizers.h"
-
 #if JXL_ADDRESS_SANITIZER || JXL_MEMORY_SANITIZER || JXL_THREAD_SANITIZER
 #include "sanitizer/common_interface_defs.h"  // __sanitizer_print_stack_trace
 #endif                                        // defined(*_SANITIZER)

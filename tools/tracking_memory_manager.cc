@@ -24,8 +24,8 @@ TrackingMemoryManager::TrackingMemoryManager(uint64_t cap, uint64_t total_cap)
   inner_ = &default_;
 
   outer_.opaque = reinterpret_cast<void*>(this);
-  outer_.alloc = &Alloc;
-  outer_.free = &Free;
+  outer_._alloc = &Alloc;
+  outer_._free = &Free;
 }
 
 void* TrackingMemoryManager::Alloc(void* opaque, size_t size) {
@@ -58,7 +58,7 @@ void* TrackingMemoryManager::Alloc(void* opaque, size_t size) {
     self->max_bytes_in_use = std::max(self->max_bytes_in_use, new_bytes_in_use);
     self->total_bytes_allocated = new_total;
   }
-  void* result = self->inner_->alloc(self->inner_->opaque, size);
+  void* result = self->inner_->_alloc(self->inner_->opaque, size);
   if (result != nullptr) {
     std::lock_guard<std::mutex> guard(self->map_mutex_);
     self->allocations_[result] = size;
@@ -99,7 +99,7 @@ void TrackingMemoryManager::Free(void* opaque, void* address) {
     self->num_allocations_--;
     self->bytes_in_use_ -= size;
   }
-  self->inner_->free(self->inner_->opaque, address);
+  self->inner_->_free(self->inner_->opaque, address);
 }
 
 jxl::Status TrackingMemoryManager::Reset() {

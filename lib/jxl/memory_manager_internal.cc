@@ -32,11 +32,11 @@ void MemoryManagerDefaultFree(void* opaque, void* address) { free(address); }
 }  // namespace
 
 void* MemoryManagerAlloc(const JxlMemoryManager* memory_manager, size_t size) {
-  return memory_manager->alloc(memory_manager->opaque, size);
+  return memory_manager->_alloc(memory_manager->opaque, size);
 }
 
 void MemoryManagerFree(const JxlMemoryManager* memory_manager, void* address) {
-  memory_manager->free(memory_manager->opaque, address);
+  memory_manager->_free(memory_manager->opaque, address);
 }
 
 Status MemoryManagerInit(JxlMemoryManager* self,
@@ -46,13 +46,13 @@ Status MemoryManagerInit(JxlMemoryManager* self,
   } else {
     memset(self, 0, sizeof(*self));
   }
-  bool is_default_alloc = (self->alloc == nullptr);
-  bool is_default_free = (self->free == nullptr);
+  bool is_default_alloc = (self->_alloc == nullptr);
+  bool is_default_free = (self->_free == nullptr);
   if (is_default_alloc != is_default_free) {
     return false;
   }
-  if (is_default_alloc) self->alloc = jxl::MemoryManagerDefaultAlloc;
-  if (is_default_free) self->free = jxl::MemoryManagerDefaultFree;
+  if (is_default_alloc) self->_alloc = jxl::MemoryManagerDefaultAlloc;
+  if (is_default_free) self->_free = jxl::MemoryManagerDefaultFree;
 
   return true;
 }
@@ -98,7 +98,7 @@ StatusOr<AlignedMemory> AlignedMemory::Create(JxlMemoryManager* memory_manager,
   }
   JXL_ENSURE(memory_manager);
   void* allocated =
-      memory_manager->alloc(memory_manager->opaque, allocation_size);
+      memory_manager->_alloc(memory_manager->opaque, allocation_size);
   if (allocated == nullptr) {
     return JXL_FAILURE("Allocation failed");
   }
@@ -140,7 +140,7 @@ AlignedMemory::AlignedMemory(AlignedMemory&& other) noexcept {
 AlignedMemory& AlignedMemory::operator=(AlignedMemory&& other) noexcept {
   if (this == &other) return *this;
   if (memory_manager_ && allocation_) {
-    memory_manager_->free(memory_manager_->opaque, allocation_);
+    memory_manager_->_free(memory_manager_->opaque, allocation_);
   }
   allocation_ = other.allocation_;
   memory_manager_ = other.memory_manager_;
@@ -151,7 +151,7 @@ AlignedMemory& AlignedMemory::operator=(AlignedMemory&& other) noexcept {
 
 AlignedMemory::~AlignedMemory() {
   if (memory_manager_ == nullptr) return;
-  memory_manager_->free(memory_manager_->opaque, allocation_);
+  memory_manager_->_free(memory_manager_->opaque, allocation_);
 }
 
 }  // namespace jxl

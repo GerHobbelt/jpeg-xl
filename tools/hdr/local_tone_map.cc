@@ -27,6 +27,8 @@
 #include "tools/no_memory_manager.h"
 #include "tools/thread_pool_internal.h"
 
+#include "monolithic_examples.h"
+
 #if !defined(QUIT)
 #define QUIT(M) JPEGXL_TOOLS_ABORT(M)
 #endif
@@ -280,6 +282,11 @@ Status ProcessFrame(CodecInOut* image, float preserve_saturation,
 
 }  // namespace
 }  // namespace jxl
+
+
+#if defined(BUILD_MONOLITHIC)
+#define main(cnt, arr) jpegXL_local_tone_map_main(cnt, arr)
+#endif
 
 int main(int argc, const char** argv) {
   jpegxl::tools::ThreadPoolInternal pool(8);

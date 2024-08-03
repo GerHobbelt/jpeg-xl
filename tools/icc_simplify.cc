@@ -17,6 +17,14 @@
 #include "tools/no_memory_manager.h"
 #include "tools/thread_pool_internal.h"
 
+#include "monolithic_examples.h"
+
+
+
+#if defined(BUILD_MONOLITHIC)
+#define main(cnt, arr) jpegXL_icc_simplify_main(cnt, arr)
+#endif
+
 int main(int argc, const char** argv) {
   jpegxl::tools::ThreadPoolInternal pool;
 

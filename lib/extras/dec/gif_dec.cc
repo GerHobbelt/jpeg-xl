@@ -8,7 +8,6 @@
 #include "lib/jxl/base/status.h"
 
 #if JPEGXL_ENABLE_GIF
-
 #include <gif_lib.h>
 #endif
 #include <jxl/codestream_header.h>
@@ -431,5 +430,3 @@ Status DecodeImageGIF(Span<const uint8_t> bytes, const ColorHints& color_hints,
 
 }  // namespace extras
 }  // namespace jxl
-
-#endif
