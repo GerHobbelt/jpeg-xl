@@ -2,7 +2,9 @@
 /build
 /build*
 /bazel*
-/docker/*.log
+
+# clangd
+.cache
 
 # The downloaded corpora files for benchmark.
 /third_party/corpora

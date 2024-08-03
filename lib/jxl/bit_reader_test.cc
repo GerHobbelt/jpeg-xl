@@ -3,21 +3,23 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-#include <stddef.h>
-#include <stdint.h>
+#include <jxl/memory_manager.h>
 
-#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <utility>
 #include <vector>
 
-#include "gtest/gtest.h"
+#include "lib/jxl/base/common.h"
 #include "lib/jxl/base/data_parallel.h"
 #include "lib/jxl/base/random.h"
 #include "lib/jxl/base/span.h"
-#include "lib/jxl/base/thread_pool_internal.h"
-#include "lib/jxl/common.h"
 #include "lib/jxl/dec_bit_reader.h"
 #include "lib/jxl/enc_aux_out.h"
 #include "lib/jxl/enc_bit_writer.h"
+#include "lib/jxl/test_memory_manager.h"
+#include "lib/jxl/test_utils.h"
+#include "lib/jxl/testing.h"
 
 namespace jxl {
 namespace {
@@ -27,7 +29,7 @@ TEST(BitReaderTest, ExtendsWithZeroes) {
     std::vector<uint8_t> data(size, 0xff);
 
     for (size_t n_bytes = 0; n_bytes < size; n_bytes++) {
-      BitReader br(Span<const uint8_t>(data.data(), n_bytes));
+      BitReader br(Bytes(data.data(), n_bytes));
       // Read all the bits
       for (size_t i = 0; i < n_bytes * kBitsPerByte; i++) {
         ASSERT_EQ(br.ReadBits(1), 1u) << "n_bytes=" << n_bytes << " i=" << i;
@@ -51,101 +53,108 @@ struct Symbol {
 
 // Reading from output gives the same values.
 TEST(BitReaderTest, TestRoundTrip) {
-  ThreadPoolInternal pool(8);
-  EXPECT_TRUE(RunOnPool(
-      &pool, 0, 1000, ThreadPool::NoInit,
-      [](const uint32_t task, size_t /* thread */) {
-        constexpr size_t kMaxBits = 8000;
-        BitWriter writer;
-        BitWriter::Allotment allotment(&writer, kMaxBits);
+  JxlMemoryManager* memory_manager = jxl::test::MemoryManager();
+  test::ThreadPoolForTests pool(8);
+  const auto do_test = [&memory_manager](const uint32_t task,
+                                         size_t /* thread */) -> Status {
+    constexpr size_t kMaxBits = 8000;
+    BitWriter writer{memory_manager};
+    BitWriter::Allotment allotment(&writer, kMaxBits);
 
-        std::vector<Symbol> symbols;
-        symbols.reserve(1000);
+    std::vector<Symbol> symbols;
+    symbols.reserve(1000);
 
-        Rng rng(55537 + 129 * task);
+    Rng rng(55537 + 129 * task);
 
-        for (;;) {
-          const uint32_t num_bits = rng.UniformU(1, 33);
-          if (writer.BitsWritten() + num_bits > kMaxBits) break;
-          const uint32_t value = rng.UniformU(0, 1ULL << num_bits);
-          symbols.push_back({num_bits, value});
-          writer.Write(num_bits, value);
-        }
+    for (;;) {
+      const uint32_t num_bits = rng.UniformU(1, 33);
+      if (writer.BitsWritten() + num_bits > kMaxBits) break;
+      const uint32_t value = rng.UniformU(0, 1ULL << num_bits);
+      symbols.push_back({num_bits, value});
+      writer.Write(num_bits, value);
+    }
 
-        writer.ZeroPadToByte();
-        allotment.ReclaimAndCharge(&writer, 0, nullptr);
-        BitReader reader(writer.GetSpan());
-        for (const Symbol& s : symbols) {
-          EXPECT_EQ(s.value, reader.ReadBits(s.num_bits));
-        }
-        EXPECT_TRUE(reader.Close());
-      },
-      "TestTBitReaderRoundTrip"));
+    writer.ZeroPadToByte();
+    JXL_RETURN_IF_ERROR(
+        allotment.ReclaimAndCharge(&writer, LayerType::Header, nullptr));
+    BitReader reader(writer.GetSpan());
+    for (const Symbol& s : symbols) {
+      EXPECT_EQ(s.value, reader.ReadBits(s.num_bits));
+    }
+    JXL_RETURN_IF_ERROR(reader.Close());
+    return true;
+  };
+  EXPECT_TRUE(RunOnPool(pool.get(), 0, 1000, ThreadPool::NoInit, do_test,
+                        "TestTBitReaderRoundTrip"));
 }
 
 // SkipBits is the same as reading that many bits.
 TEST(BitReaderTest, TestSkip) {
-  ThreadPoolInternal pool(8);
-  EXPECT_TRUE(RunOnPool(
-      &pool, 0, 96, ThreadPool::NoInit,
-      [](const uint32_t task, size_t /* thread */) {
-        constexpr size_t kSize = 100;
+  JxlMemoryManager* memory_manager = jxl::test::MemoryManager();
+  test::ThreadPoolForTests pool(8);
+  const auto do_test = [&memory_manager](const uint32_t task,
+                                         size_t /* thread */) -> Status {
+    constexpr size_t kSize = 100;
 
-        for (size_t skip = 0; skip < 128; ++skip) {
-          BitWriter writer;
-          BitWriter::Allotment allotment(&writer, kSize * kBitsPerByte);
-          // Start with "task" 1-bits.
-          for (size_t i = 0; i < task; ++i) {
-            writer.Write(1, 1);
-          }
+    for (size_t skip = 0; skip < 128; ++skip) {
+      BitWriter writer{memory_manager};
+      BitWriter::Allotment allotment(&writer, kSize * kBitsPerByte);
+      // Start with "task" 1-bits.
+      for (size_t i = 0; i < task; ++i) {
+        writer.Write(1, 1);
+      }
 
-          // Write 0-bits that we will skip over
-          for (size_t i = 0; i < skip; ++i) {
-            writer.Write(1, 0);
-          }
+      // Write 0-bits that we will skip over
+      for (size_t i = 0; i < skip; ++i) {
+        writer.Write(1, 0);
+      }
 
-          // Write terminator bits '101'
-          writer.Write(3, 5);
-          EXPECT_EQ(task + skip + 3, writer.BitsWritten());
-          writer.ZeroPadToByte();
-          AuxOut aux_out;
-          allotment.ReclaimAndCharge(&writer, 0, &aux_out);
-          EXPECT_LT(aux_out.layers[0].total_bits, kSize * 8);
+      // Write terminator bits '101'
+      writer.Write(3, 5);
+      EXPECT_EQ(task + skip + 3, writer.BitsWritten());
+      writer.ZeroPadToByte();
+      AuxOut aux_out;
+      JXL_RETURN_IF_ERROR(
+          allotment.ReclaimAndCharge(&writer, LayerType::Header, &aux_out));
+      EXPECT_LT(aux_out.layer(LayerType::Header).total_bits, kSize * 8);
 
-          BitReader reader1(writer.GetSpan());
-          BitReader reader2(writer.GetSpan());
-          // Verify initial 1-bits
-          for (size_t i = 0; i < task; ++i) {
-            EXPECT_EQ(1u, reader1.ReadBits(1));
-            EXPECT_EQ(1u, reader2.ReadBits(1));
-          }
+      Bytes bytes = writer.GetSpan();
+      BitReader reader1(bytes);
+      BitReader reader2(bytes);
+      // Verify initial 1-bits
+      for (size_t i = 0; i < task; ++i) {
+        EXPECT_EQ(1u, reader1.ReadBits(1));
+        EXPECT_EQ(1u, reader2.ReadBits(1));
+      }
 
-          // SkipBits or manually read "skip" bits
-          reader1.SkipBits(skip);
-          for (size_t i = 0; i < skip; ++i) {
-            EXPECT_EQ(0u, reader2.ReadBits(1))
-                << " skip=" << skip << " i=" << i;
-          }
-          EXPECT_EQ(reader1.TotalBitsConsumed(), reader2.TotalBitsConsumed());
+      // SkipBits or manually read "skip" bits
+      reader1.SkipBits(skip);
+      for (size_t i = 0; i < skip; ++i) {
+        EXPECT_EQ(0u, reader2.ReadBits(1)) << " skip=" << skip << " i=" << i;
+      }
+      EXPECT_EQ(reader1.TotalBitsConsumed(), reader2.TotalBitsConsumed());
 
-          // Ensure both readers see the terminator bits.
-          EXPECT_EQ(5u, reader1.ReadBits(3));
-          EXPECT_EQ(5u, reader2.ReadBits(3));
+      // Ensure both readers see the terminator bits.
+      EXPECT_EQ(5u, reader1.ReadBits(3));
+      EXPECT_EQ(5u, reader2.ReadBits(3));
 
-          EXPECT_TRUE(reader1.Close());
-          EXPECT_TRUE(reader2.Close());
-        }
-      },
-      "TestSkip"));
+      JXL_RETURN_IF_ERROR(reader1.Close());
+      JXL_RETURN_IF_ERROR(reader2.Close());
+    }
+    return true;
+  };
+  EXPECT_TRUE(
+      RunOnPool(pool.get(), 0, 96, ThreadPool::NoInit, do_test, "TestSkip"));
 }
 
 // Verifies byte order and different groupings of bits.
 TEST(BitReaderTest, TestOrder) {
+  JxlMemoryManager* memory_manager = jxl::test::MemoryManager();
   constexpr size_t kMaxBits = 16;
 
   // u(1) - bits written into LSBs of first byte
   {
-    BitWriter writer;
+    BitWriter writer{memory_manager};
     BitWriter::Allotment allotment(&writer, kMaxBits);
     for (size_t i = 0; i < 5; ++i) {
       writer.Write(1, 1);
@@ -158,7 +167,8 @@ TEST(BitReaderTest, TestOrder) {
     }
 
     writer.ZeroPadToByte();
-    allotment.ReclaimAndCharge(&writer, 0, nullptr);
+    ASSERT_TRUE(
+        allotment.ReclaimAndCharge(&writer, LayerType::Header, nullptr));
     BitReader reader(writer.GetSpan());
     EXPECT_EQ(0x1Fu, reader.ReadFixedBits<8>());
     EXPECT_EQ(0xFCu, reader.ReadFixedBits<8>());
@@ -167,13 +177,14 @@ TEST(BitReaderTest, TestOrder) {
 
   // u(8) - get bytes in the same order
   {
-    BitWriter writer;
+    BitWriter writer{memory_manager};
     BitWriter::Allotment allotment(&writer, kMaxBits);
     writer.Write(8, 0xF8);
     writer.Write(8, 0x3F);
 
     writer.ZeroPadToByte();
-    allotment.ReclaimAndCharge(&writer, 0, nullptr);
+    ASSERT_TRUE(
+        allotment.ReclaimAndCharge(&writer, LayerType::Header, nullptr));
     BitReader reader(writer.GetSpan());
     EXPECT_EQ(0xF8u, reader.ReadFixedBits<8>());
     EXPECT_EQ(0x3Fu, reader.ReadFixedBits<8>());
@@ -182,12 +193,13 @@ TEST(BitReaderTest, TestOrder) {
 
   // u(16) - little-endian bytes
   {
-    BitWriter writer;
+    BitWriter writer{memory_manager};
     BitWriter::Allotment allotment(&writer, kMaxBits);
     writer.Write(16, 0xF83F);
 
     writer.ZeroPadToByte();
-    allotment.ReclaimAndCharge(&writer, 0, nullptr);
+    ASSERT_TRUE(
+        allotment.ReclaimAndCharge(&writer, LayerType::Header, nullptr));
     BitReader reader(writer.GetSpan());
     EXPECT_EQ(0x3Fu, reader.ReadFixedBits<8>());
     EXPECT_EQ(0xF8u, reader.ReadFixedBits<8>());
@@ -196,7 +208,7 @@ TEST(BitReaderTest, TestOrder) {
 
   // Non-byte-aligned, mixed sizes
   {
-    BitWriter writer;
+    BitWriter writer{memory_manager};
     BitWriter::Allotment allotment(&writer, kMaxBits);
     writer.Write(1, 1);
     writer.Write(3, 6);
@@ -204,7 +216,8 @@ TEST(BitReaderTest, TestOrder) {
     writer.Write(4, 8);
 
     writer.ZeroPadToByte();
-    allotment.ReclaimAndCharge(&writer, 0, nullptr);
+    ASSERT_TRUE(
+        allotment.ReclaimAndCharge(&writer, LayerType::Header, nullptr));
     BitReader reader(writer.GetSpan());
     EXPECT_EQ(0xBDu, reader.ReadFixedBits<8>());
     EXPECT_EQ(0x8Du, reader.ReadFixedBits<8>());
@@ -214,7 +227,7 @@ TEST(BitReaderTest, TestOrder) {
 
 TEST(BitReaderTest, TotalCountersTest) {
   uint8_t buf[8] = {1, 2, 3, 4};
-  BitReader reader(Span<const uint8_t>(buf, sizeof(buf)));
+  BitReader reader(Bytes(buf, sizeof(buf)));
 
   EXPECT_EQ(sizeof(buf), reader.TotalBytes());
   EXPECT_EQ(0u, reader.TotalBitsConsumed());
@@ -240,7 +253,7 @@ TEST(BitReaderTest, MoveTest) {
   uint8_t buf[8] = {1, 2, 3, 4};
   BitReader reader2;
   {
-    BitReader reader1(Span<const uint8_t>(buf, sizeof(buf)));
+    BitReader reader1(Bytes(buf, sizeof(buf)));
 
     EXPECT_EQ(0u, reader1.TotalBitsConsumed());
     reader1.ReadFixedBits<16>();

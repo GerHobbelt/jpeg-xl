@@ -5,10 +5,11 @@
 
 #include "tools/wasm_demo/jxl_decompressor.h"
 
+#include <jxl/thread_parallel_runner_cxx.h>
+
 #include <cstring>
 #include <memory>
 
-#include "jxl/thread_parallel_runner_cxx.h"
 #include "lib/extras/dec/jxl.h"
 #include "tools/wasm_demo/no_png.h"
 
@@ -70,7 +71,7 @@ DecompressorOutput* jxlDecompress(const uint8_t* input, size_t input_size) {
   auto report_error = [&](uint32_t code, const char* text) {
     fprintf(stderr, "%s\n", text);
     delete self;
-    return reinterpret_cast<DecompressorOutput*>(code);
+    return reinterpret_cast<DecompressorOutput*>(code);  // NOLINT
   };
 
   auto thread_pool = JxlThreadParallelRunnerMake(nullptr, 4);

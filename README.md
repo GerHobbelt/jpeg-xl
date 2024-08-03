@@ -12,6 +12,10 @@ https://github.com/libjxl/libjxl/actions/workflows/fuzz.yml)
 https://github.com/libjxl/libjxl/actions/workflows/release.yaml)
 [![Doc](https://readthedocs.org/projects/libjxl/badge/?version=latest)](
 https://libjxl.readthedocs.io/en/latest/?badge=latest)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/7845/badge)](
+https://www.bestpractices.dev/projects/7845)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/libjxl/libjxl/badge)](
+https://securityscorecards.dev/viewer/?uri=github.com/libjxl/libjxl)
 [![codecov](https://codecov.io/gh/libjxl/libjxl/branch/main/graph/badge.svg)](
 https://codecov.io/gh/libjxl/libjxl)
 
@@ -40,8 +44,9 @@ On MacOS, you can use [Homebrew](https://brew.sh/): `brew install jpeg-xl`.
 
 [![libjxl packaging status](https://repology.org/badge/vertical-allrepos/libjxl.svg?exclude_unsupported=1&columns=3&exclude_sources=modules,site&header=libjxl%20packaging%20status)](https://repology.org/project/libjxl/versions)
 
-
-For Windows, binaries can be downloaded from the [releases page](https://github.com/libjxl/libjxl/releases/).
+From the [releases page](https://github.com/libjxl/libjxl/releases/) the following can be downloaded:
+ - Windows binaries 
+ - Debian and Ubuntu .deb packages 
 
 Of course you can also [build libjxl from sources](BUILDING.md).
 
@@ -68,11 +73,14 @@ To decode a JPEG XL file run:
 djxl input.jxl output.png
 ```
 
-When possible `cjxl`/`djxl` are able to read/write the following
-image formats: .exr, .gif, .jpeg/.jpg, .pfm, .pgm/.ppm, .pgx, .png.
+When possible, `cjxl`/`djxl` are able to read/write the following image formats:
+OpenEXR (`.exr`), GIF (`.gif`), JPEG (`.jpg`/`.jpeg`), NetPBM (`.pam`/`.pgm`/`.ppm`),
+Portable FloatMap (`.pfm`), PGX Test Format (`.pgx`), Portable Network Graphics (`.png`),
+Animated PNG (`.png`/`.apng`), and JPEG XL itself (`.jxl`).
+
 Specifically for JPEG files, the default `cjxl` behavior is to apply lossless
 recompression and the default `djxl` behavior is to reconstruct the original
-JPEG file (when the extension of the output file is .jpg).
+JPEG file (when the extension of the output file is `.jpg`).
 
 ### Benchmarking
 
@@ -122,6 +130,7 @@ format: Cloudinary and Google.
 *   [Test coverage on Codecov.io](https://app.codecov.io/gh/libjxl/libjxl) - for
     developers
 *   [libjxl documentation on readthedocs.io](https://libjxl.readthedocs.io/)
+*   The development of jpegli, the improved JPEG encoder and decoder, will continue at https://github.com/google/jpegli
 
 ### Contact
 

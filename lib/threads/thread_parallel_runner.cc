@@ -3,9 +3,14 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-#include "jxl/thread_parallel_runner.h"
-
+#include <jxl/memory_manager.h>
+#include <jxl/parallel_runner.h>
+#include <jxl/thread_parallel_runner.h>
 #include <string.h>
+
+#include <cstdint>
+#include <cstdlib>
+#include <thread>
 
 #include "lib/threads/thread_parallel_runner_internal.h"
 
@@ -36,11 +41,13 @@ bool ThreadMemoryManagerInit(JxlMemoryManager* self,
   } else {
     memset(self, 0, sizeof(*self));
   }
-  if (!self->_alloc != !self->_free) {
+  bool is_default_alloc = (self->alloc == nullptr);
+  bool is_default_free = (self->free == nullptr);
+  if (is_default_alloc != is_default_free) {
     return false;
   }
-  if (!self->_alloc) self->_alloc = ThreadMemoryManagerDefaultAlloc;
-  if (!self->_free) self->_free = ThreadMemoryManagerDefaultFree;
+  if (is_default_alloc) self->alloc = ThreadMemoryManagerDefaultAlloc;
+  if (is_default_free) self->free = ThreadMemoryManagerDefaultFree;
 
   return true;
 }
@@ -52,7 +59,7 @@ void* ThreadMemoryManagerAlloc(const JxlMemoryManager* memory_manager,
 
 void ThreadMemoryManagerFree(const JxlMemoryManager* memory_manager,
                              void* address) {
-  return memory_manager->_free(memory_manager->opaque, address);
+  memory_manager->_free(memory_manager->opaque, address);
 }
 
 }  // namespace

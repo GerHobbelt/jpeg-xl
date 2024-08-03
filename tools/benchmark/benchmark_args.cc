@@ -5,24 +5,25 @@
 
 #include "tools/benchmark/benchmark_args.h"
 
-#include <stddef.h>
-#include <stdlib.h>
+#include <jxl/color_encoding.h>
 
-#include <algorithm>
+#include <cstddef>
+#include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
-#include "lib/extras/codec.h"
 #include "lib/extras/dec/color_description.h"
+#include "lib/extras/dec/decode.h"
 #include "lib/jxl/base/status.h"
 #include "lib/jxl/color_encoding_internal.h"
-#include "lib/jxl/color_management.h"
 #include "tools/benchmark/benchmark_codec_custom.h"  // for AddCommand..
-#include "tools/benchmark/benchmark_codec_jpeg.h"  // for AddCommand..
+#include "tools/benchmark/benchmark_codec_jpeg.h"    // for AddCommand..
 #include "tools/benchmark/benchmark_codec_jxl.h"
-#if JPEGXL_ENABLE_APNG
+
+#ifdef BENCHMARK_PNG
 #include "tools/benchmark/benchmark_codec_png.h"
-#endif
+#endif  // BENCHMARK_PNG
 
 #ifdef BENCHMARK_WEBP
 #include "tools/benchmark/benchmark_codec_webp.h"
@@ -32,7 +33,8 @@
 #include "tools/benchmark/benchmark_codec_avif.h"
 #endif  // BENCHMARK_AVIF
 
-namespace jxl {
+namespace jpegxl {
+namespace tools {
 
 std::vector<std::string> SplitString(const std::string& s, char c) {
   std::vector<std::string> result;
@@ -46,10 +48,11 @@ std::vector<std::string> SplitString(const std::string& s, char c) {
   return result;
 }
 
-int ParseIntParam(const std::string& param, int lower_bound, int upper_bound) {
-  int val = strtol(param.substr(1).c_str(), nullptr, 10);
-  JXL_CHECK(val >= lower_bound && val <= upper_bound);
-  return val;
+Status ParseIntParam(const std::string& param, int lower_bound, int upper_bound,
+                     int& val) {
+  val = strtol(param.substr(1).c_str(), nullptr, 10);
+  JXL_ENSURE(val >= lower_bound && val <= upper_bound);
+  return true;
 }
 
 BenchmarkArgs* Args() {
@@ -193,8 +196,6 @@ Status BenchmarkArgs::AddCommandLineOptions() {
   AddDouble(&error_pnorm, "error_pnorm",
             "smallest p norm for pooling butteraugli values", 3.0);
 
-  AddFlag(&profiler, "profiler", "If true, print profiler results.", false);
-
   AddFlag(&show_progress, "show_progress",
           "Show activity dots per completed file during benchmark.", false);
 
@@ -212,14 +213,20 @@ Status BenchmarkArgs::AddCommandLineOptions() {
       "Distance numbers and compression speeds shown in the table are invalid.",
       false);
 
+  AddUnsigned(
+      &generations, "generations",
+      "If nonzero, enables generation loss testing with this number of "
+      "intermediate generations. "
+      "That is, the decoded image gets re-encoded, iteratively, N times.",
+      0);
+
   if (!AddCommandLineOptionsCustomCodec(this)) return false;
   if (!AddCommandLineOptionsJxlCodec(this)) return false;
-#ifdef BENCHMARK_JPEG
   if (!AddCommandLineOptionsJPEGCodec(this)) return false;
-#endif  // BENCHMARK_JPEG
-#if JPEGXL_ENABLE_APNG
+
+#ifdef BENCHMARK_PNG
   if (!AddCommandLineOptionsPNGCodec(this)) return false;
-#endif
+#endif  // BENCHMARK_PNG
 #ifdef BENCHMARK_WEBP
   if (!AddCommandLineOptionsWebPCodec(this)) return false;
 #endif  // BENCHMARK_WEBP
@@ -231,13 +238,12 @@ Status BenchmarkArgs::AddCommandLineOptions() {
 }
 
 Status BenchmarkArgs::ValidateArgs() {
-  size_t bits_per_sample = 0;  // unused
   if (input.empty()) {
     fprintf(stderr, "Missing --input filename(s).\n");
     return false;
   }
-  if (extras::CodecFromExtension(output_extension, &bits_per_sample) ==
-      extras::Codec::kUnknown) {
+  if (jxl::extras::CodecFromPath(output_extension) ==
+      jxl::extras::Codec::kUnknown) {
     JXL_WARNING("Unrecognized output_extension %s, try .png",
                 output_extension.c_str());
     return false;  // already warned
@@ -248,14 +254,13 @@ Status BenchmarkArgs::ValidateArgs() {
   if (!output_description.empty()) {
     // Validate, but also create the profile (only needs to happen once).
     JxlColorEncoding output_encoding_external;
-    if (!ParseDescription(output_description, &output_encoding_external)) {
+    if (!jxl::ParseDescription(output_description, &output_encoding_external)) {
       JXL_WARNING("Unrecognized output_description %s, try RGB_D65_SRG_Rel_Lin",
                   output_description.c_str());
       return false;  // already warned
     }
-    JXL_RETURN_IF_ERROR(jxl::ConvertExternalToInternalColorEncoding(
-        output_encoding_external, &output_encoding));
-    JXL_RETURN_IF_ERROR(output_encoding.CreateICC());
+    JXL_RETURN_IF_ERROR(output_encoding.FromExternal(output_encoding_external));
+    JXL_RETURN_IF_ERROR(!output_encoding.ICC().empty());
   }
 
   JXL_RETURN_IF_ERROR(ValidateArgsJxlCodec(this));
@@ -281,4 +286,5 @@ Status BenchmarkArgs::ValidateArgs() {
   return true;
 }
 
-}  // namespace jxl
+}  // namespace tools
+}  // namespace jpegxl

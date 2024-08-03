@@ -7,15 +7,14 @@
 // available at once). The example outputs the pixels and color information to a
 // floating point image and an ICC profile on disk.
 
+#include <jxl/decode.h>
+#include <jxl/decode_cxx.h>
 #include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
 #include <vector>
-
-#include "jxl/decode.h"
-#include "jxl/decode_cxx.h"
 
 #include "monolithic_examples.h"
 
@@ -27,7 +26,8 @@ static bool DecodeJpegXlExif(const uint8_t* jxl, size_t size,
 
   // We're only interested in the Exif boxes in this example, so don't
   // subscribe to events related to pixel data.
-  if (JXL_DEC_SUCCESS != JxlDecoderSubscribeEvents(dec.get(), JXL_DEC_BOX)) {
+  if (JXL_DEC_SUCCESS != JxlDecoderSubscribeEvents(
+                             dec.get(), JXL_DEC_BOX | JXL_DEC_BOX_COMPLETE)) {
     fprintf(stderr, "JxlDecoderSubscribeEvents failed\n");
     return false;
   }
@@ -61,8 +61,9 @@ static bool DecodeJpegXlExif(const uint8_t* jxl, size_t size,
         return true;
       }
       JxlBoxType type;
-      if (JXL_DEC_SUCCESS !=
-          JxlDecoderGetBoxType(dec.get(), type, support_decompression)) {
+      status = JxlDecoderGetBoxType(dec.get(), type,
+                                    TO_JXL_BOOL(support_decompression));
+      if (JXL_DEC_SUCCESS != status) {
         fprintf(stderr, "Error, failed to get box type\n");
         return false;
       }
@@ -76,7 +77,7 @@ static bool DecodeJpegXlExif(const uint8_t* jxl, size_t size,
       exif->resize(exif->size() + kChunkSize);
       JxlDecoderSetBoxBuffer(dec.get(), exif->data() + output_pos,
                              exif->size() - output_pos);
-    } else if (status == JXL_DEC_SUCCESS) {
+    } else if (status == JXL_DEC_BOX_COMPLETE) {
       if (!exif->empty()) {
         size_t remaining = JxlDecoderReleaseBoxBuffer(dec.get());
         exif->resize(exif->size() - remaining);
@@ -101,7 +102,7 @@ static bool LoadFile(const char* filename, std::vector<uint8_t>* out) {
     return false;
   }
 
-  long size = ftell(file);
+  long size = ftell(file);  // NOLINT
   // Avoid invalid file or directory.
   if (size >= LONG_MAX || size < 0) {
     fclose(file);

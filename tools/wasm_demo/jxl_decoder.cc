@@ -5,13 +5,14 @@
 
 #include "tools/wasm_demo/jxl_decoder.h"
 
+#include <jxl/decode.h>
+#include <jxl/decode_cxx.h>
+#include <jxl/thread_parallel_runner_cxx.h>
+
+#include <cstdio>
 #include <cstring>
 #include <memory>
 #include <vector>
-
-#include "jxl/decode.h"
-#include "jxl/decode_cxx.h"
-#include "jxl/thread_parallel_runner_cxx.h"
 
 #include "monolithic_examples.h"
 
@@ -54,7 +55,7 @@ DecoderInstance* jxlCreateInstance(bool want_sdr, uint32_t display_nits) {
   auto report_error = [&](uint32_t code, const char* text) {
     fprintf(stderr, "%s\n", text);
     delete self;
-    return reinterpret_cast<DecoderInstance*>(code);
+    return reinterpret_cast<DecoderInstance*>(code);  // NOLINT
   };
 
   self->thread_pool = JxlThreadParallelRunnerMake(nullptr, 4);
