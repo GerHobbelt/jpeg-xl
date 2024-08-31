@@ -490,7 +490,12 @@ JxlEncoderStatus BrotliCompress(int quality, const uint8_t* in, size_t in_size,
   BrotliEncoderSetParameter(enc.get(), BROTLI_PARAM_SIZE_HINT, in_size);
 
   constexpr size_t kBufferSize = 128 * 1024;
-  jxl::PaddedBytes temp_buffer(memory_manager, kBufferSize);
+#define QUIT(message) return JXL_API_ERROR_NOSET(message)
+  JXL_ASSIGN_OR_QUIT(
+      jxl::PaddedBytes temp_buffer,
+      jxl::PaddedBytes::WithInitialSpace(memory_manager, kBufferSize),
+      "Initialization of PaddedBytes failed");
+#undef QUIT
 
   size_t avail_in = in_size;
   const uint8_t* next_in = in;
@@ -783,10 +788,11 @@ jxl::Status JxlEncoderStruct::ProcessOneEnqueuedInput() {
     }
     // TODO(lode): preview should be added here if a preview image is added
 
-    jxl::BitWriter::Allotment allotment(&writer, 8);
-    writer.ZeroPadToByte();
     JXL_RETURN_IF_ERROR(
-        allotment.ReclaimAndCharge(&writer, jxl::LayerType::Header, aux_out));
+        writer.WithMaxBits(8, jxl::LayerType::Header, aux_out, [&] {
+          writer.ZeroPadToByte();
+          return true;
+        }));
 
     header_bytes = std::move(writer).TakeBytes();
 

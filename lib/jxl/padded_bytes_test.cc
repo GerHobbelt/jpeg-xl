@@ -18,7 +18,8 @@ namespace {
 
 TEST(PaddedBytesTest, TestNonEmptyFirstByteZero) {
   JxlMemoryManager* memory_manager = jxl::test::MemoryManager();
-  PaddedBytes pb(memory_manager, 1);
+  JXL_TEST_ASSIGN_OR_DIE(PaddedBytes pb,
+                         PaddedBytes::WithInitialSpace(memory_manager, 1));
   EXPECT_EQ(0, pb[0]);
   // Even after resizing..
   pb.resize(20);
@@ -30,7 +31,8 @@ TEST(PaddedBytesTest, TestNonEmptyFirstByteZero) {
 
 TEST(PaddedBytesTest, TestEmptyFirstByteZero) {
   JxlMemoryManager* memory_manager = jxl::test::MemoryManager();
-  PaddedBytes pb(memory_manager, 0);
+  JXL_TEST_ASSIGN_OR_DIE(PaddedBytes pb,
+                         PaddedBytes::WithInitialSpace(memory_manager, 0));
   // After resizing - new zero is written despite there being nothing to copy.
   pb.resize(20);
   EXPECT_EQ(0, pb[0]);

@@ -32,32 +32,17 @@ class PaddedBytes {
   explicit PaddedBytes(JxlMemoryManager* memory_manager)
       : memory_manager_(memory_manager), size_(0), capacity_(0) {}
 
-  PaddedBytes(JxlMemoryManager* memory_manager, size_t size)
-      : memory_manager_(memory_manager), size_(size), capacity_(0) {
-    reserve(size);
+  static StatusOr<PaddedBytes> WithInitialSpace(
+      JxlMemoryManager* memory_manager, size_t size) {
+    PaddedBytes result(memory_manager);
+    // TODO(firsching): after changing Init to return a Status, use it here.
+    result.Init(size);
+    return result;
   }
 
-  PaddedBytes(JxlMemoryManager* memory_manager, size_t size, uint8_t value)
-      : memory_manager_(memory_manager), size_(size), capacity_(0) {
-    reserve(size);
-    if (size_ != 0) {
-      memset(data(), value, size);
-    }
-  }
-
-  PaddedBytes(const PaddedBytes& other)
-      : memory_manager_(other.memory_manager_),
-        size_(other.size_),
-        capacity_(0) {
-    reserve(size_);
-    if (data() != nullptr) memcpy(data(), other.data(), size_);
-  }
-  PaddedBytes& operator=(const PaddedBytes& other) {
-    if (this == &other) return *this;
-    resize(other.size());
-    if (data() != nullptr) memmove(data(), other.data(), size_);
-    return *this;
-  }
+  // Deleting copy constructor and copy assignment operator to prevent copying
+  PaddedBytes(const PaddedBytes&) = delete;
+  PaddedBytes& operator=(const PaddedBytes&) = delete;
 
   // default is not OK - need to set other.size_ to 0!
   PaddedBytes(PaddedBytes&& other) noexcept
@@ -200,6 +185,11 @@ class PaddedBytes {
   }
 
  private:
+  void Init(size_t size) {
+    size_ = size;
+    reserve(size);
+  }
+
   void BoundsCheck(size_t i) const {
     // <= is safe due to padding and required by BitWriter.
     JXL_DASSERT(i <= size());

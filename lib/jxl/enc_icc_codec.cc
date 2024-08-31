@@ -32,10 +32,13 @@ namespace {
 // elements at the bottom of the rightmost column. The input is the input matrix
 // in scanline order, the output is the result matrix in scanline order, with
 // missing elements skipped over (this may occur at multiple positions).
-void Unshuffle(JxlMemoryManager* memory_manager, uint8_t* data, size_t size,
-               size_t width) {
+Status Unshuffle(JxlMemoryManager* memory_manager, uint8_t* data, size_t size,
+                 size_t width) {
   size_t height = (size + width - 1) / width;  // amount of rows of input
-  PaddedBytes result(memory_manager, size);
+  PaddedBytes result(memory_manager);
+  JXL_ASSIGN_OR_RETURN(result,
+                       PaddedBytes::WithInitialSpace(memory_manager, size));
+
   // i = input index, j output index
   size_t s = 0;
   size_t j = 0;
@@ -48,6 +51,7 @@ void Unshuffle(JxlMemoryManager* memory_manager, uint8_t* data, size_t size,
   for (size_t i = 0; i < size; i++) {
     data[i] = result[i];
   }
+  return true;
 }
 
 // This is performed by the encoder, the encoder must be able to encode any
@@ -70,7 +74,10 @@ Status PredictAndShuffle(size_t stride, size_t width, int order, size_t num,
     result->push_back(data[*pos + i] - predicted);
   }
   *pos += num;
-  if (width > 1) Unshuffle(memory_manager, result->data() + start, num, width);
+  if (width > 1) {
+    JXL_RETURN_IF_ERROR(
+        Unshuffle(memory_manager, result->data() + start, num, width));
+  }
   return true;
 }
 
@@ -289,7 +296,8 @@ Status PredictICC(const uint8_t* icc, size_t size, PaddedBytes* result) {
           data_add.push_back(icc[pos]);
           pos++;
         }
-        Unshuffle(memory_manager, data_add.data() + start, num, 2);
+        JXL_RETURN_IF_ERROR(
+            Unshuffle(memory_manager, data_add.data() + start, num, 2));
       }
 
       if (tag == kCurvTag && tag_sane() && pos + tagsize <= size &&
@@ -442,9 +450,9 @@ Status WriteICC(const Span<const uint8_t> icc, BitWriter* JXL_RESTRICT writer,
   PaddedBytes enc{memory_manager};
   JXL_RETURN_IF_ERROR(PredictICC(icc.data(), icc.size(), &enc));
   std::vector<std::vector<Token>> tokens(1);
-  BitWriter::Allotment allotment(writer, 128);
-  JXL_RETURN_IF_ERROR(U64Coder::Write(enc.size(), writer));
-  JXL_RETURN_IF_ERROR(allotment.ReclaimAndCharge(writer, layer, aux_out));
+  JXL_RETURN_IF_ERROR(writer->WithMaxBits(128, layer, aux_out, [&] {
+    return U64Coder::Write(enc.size(), writer);
+  }));
 
   for (size_t i = 0; i < enc.size(); i++) {
     tokens[0].emplace_back(
