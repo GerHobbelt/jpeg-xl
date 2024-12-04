@@ -101,7 +101,15 @@ static Status RunButteraugli(const char* pathname1, const char* pathname2,
   ButteraugliParams butteraugli_params;
   butteraugli_params.hf_asymmetry = 1.0f;
   butteraugli_params.xmul = 1.0f;
-  butteraugli_params.intensity_target = intensity_target;
+  if (intensity_target > 0) {
+    butteraugli_params.intensity_target = intensity_target;
+  } else {
+    const auto& transfer_function = io1.Main().c_current().Tf();
+    butteraugli_params.intensity_target = transfer_function.IsPQ() ? 10000.f
+                                          : transfer_function.IsHLG()
+                                              ? 1000.f
+                                              : 80.f;  // sRGB intensity target.
+  }
   const JxlCmsInterface& cms = *JxlGetDefaultCms();
   JxlButteraugliComparator comparator(butteraugli_params, cms);
   float distance;
@@ -158,7 +166,7 @@ int main(int argc, const char** argv) {
             " without attached profiles (such as ppm or pfm) are interpreted"
             " as nonlinear sRGB. The hint format is RGB_D65_SRG_Rel_Lin for"
             " linear sRGB. Intensity target is viewing conditions screen nits"
-            ", defaults to 80.\n",
+            ", defaults to 80 for SDR input.\n",
             argv[0]);
     return 1;
   }
@@ -166,7 +174,7 @@ int main(int argc, const char** argv) {
   std::string raw_distmap;
   std::string colorspace;
   double p = 3;
-  float intensity_target = 80.0;  // sRGB intensity target.
+  float intensity_target = 0.f;
   for (int i = 3; i < argc; i++) {
     if (std::string(argv[i]) == "--distmap" && i + 1 < argc) {
       distmap = argv[++i];
