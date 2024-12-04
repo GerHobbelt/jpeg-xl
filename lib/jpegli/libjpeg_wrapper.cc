@@ -140,7 +140,7 @@ void jpeg_stdio_dest(j_compress_ptr cinfo, FILE *outfile) {
 }
 
 void jpeg_mem_dest(j_compress_ptr cinfo, unsigned char **outbuffer,
-                   unsigned long *outsize /* NOLINT */) {
+                   size_t *outsize /* NOLINT */) {
   jpegli_mem_dest(cinfo, outbuffer, outsize);
 }
 
