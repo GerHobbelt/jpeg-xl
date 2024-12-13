@@ -12,23 +12,11 @@
 
 // PRIuS and PRIdS macros to print size_t and ssize_t respectively.
 #if !defined(PRIdS)
-#if defined(_WIN64)
-#define PRIdS "lld"
-#elif defined(_WIN32)
-#define PRIdS "d"
-#else
 #define PRIdS "zd"
-#endif
 #endif  // PRIdS
 
 #if !defined(PRIuS)
-#if defined(_WIN64)
-#define PRIuS "llu"
-#elif defined(_WIN32)
-#define PRIuS "u"
-#else
 #define PRIuS "zu"
-#endif
 #endif  // PRIuS
 
 #endif  // LIB_JXL_BASE_PRINTF_MACROS_H_
