@@ -39,8 +39,8 @@ TEST(CompressedIccTest, Roundtrip) {
 
   EXPECT_EQ(0, memcmp(decompressed_icc, icc.data(), decompressed_icc_size));
 
-  memory_manager->free(memory_manager->opaque, compressed_icc);
-  memory_manager->free(memory_manager->opaque, decompressed_icc);
+  memory_manager->_free(memory_manager->opaque, compressed_icc);
+  memory_manager->_free(memory_manager->opaque, decompressed_icc);
 }
 
 }  // namespace
