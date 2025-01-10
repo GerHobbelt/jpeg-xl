@@ -16,6 +16,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+
+#include "monolithic_examples.h"
+
+
 static void PrintColorEncoding(const JxlColorEncoding* color_encoding) {
   const char* const cs_string[4] = {"RGB", "Grayscale", "XYB", "Unknown"};
   const char* const wp_string[12] = {"", "D65", "Custom", "", "",  "",
@@ -283,7 +287,7 @@ static int PrintBasicInfo(FILE* file, int verbose) {
           fprintf(stderr, "JxlDecoderGetICCProfileSize failed\n");
           continue;
         }
-        printf("%" PRIu64 "-byte ICC profile, ", (uint64_t)profile_size);
+        printf("%zu-byte ICC profile, ", profile_size);
         if (profile_size < 132) {
           fprintf(stderr, "ICC profile too small\n");
           continue;
