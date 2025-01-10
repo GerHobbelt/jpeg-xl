@@ -41,6 +41,7 @@
 #include "lib/jxl/codec_in_out.h"
 #include "lib/jxl/color_encoding_internal.h"
 #include "lib/jxl/enc_butteraugli_comparator.h"
+#include "lib/jxl/enc_comparator.h"
 #include "lib/jxl/image.h"
 #include "lib/jxl/image_bundle.h"
 #include "lib/jxl/image_ops.h"
@@ -1016,9 +1017,9 @@ class Benchmark {
           memcpy(row_out, &row_in[x0], size * sizeof(row_out[0]));
         }
       }
-      std::string fn_output =
-          StringPrintf("%s/%s.crop_%dx%d+%d+%d.png", sample_tmp_dir.c_str(),
-                       FileBaseName(fnames[idx]).c_str(), size, size, x0, y0);
+      std::string fn_output = StringPrintf(
+          "%s/%s.crop_%" PRIuS "x%" PRIuS "+%d+%d.png", sample_tmp_dir.c_str(),
+          FileBaseName(fnames[idx]).c_str(), size, size, x0, y0);
       ThreadPool* null_pool = nullptr;
       JPEGXL_TOOLS_CHECK(WriteImage(sample, null_pool, fn_output));
       fnames_out.push_back(fn_output);

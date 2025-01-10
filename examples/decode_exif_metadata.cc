@@ -9,11 +9,12 @@
 
 #include <jxl/decode.h>
 #include <jxl/decode_cxx.h>
-#include <limits.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <string.h>
+#include <jxl/types.h>
 
+#include <climits>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
 #include <vector>
 
 #include "monolithic_examples.h"
