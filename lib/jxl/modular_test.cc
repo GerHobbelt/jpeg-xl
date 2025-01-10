@@ -131,6 +131,7 @@ TEST(ModularTest, RoundtripLossyDeltaPalette) {
   cparams.color_transform = jxl::ColorTransform::kNone;
   cparams.lossy_palette = true;
   cparams.palette_colors = 0;
+  extras::JXLDecompressParams dparams;
 
   CodecInOut io_out{memory_manager};
 
@@ -139,7 +140,7 @@ TEST(ModularTest, RoundtripLossyDeltaPalette) {
   ASSERT_TRUE(io.ShrinkTo(300, 100));
 
   size_t compressed_size;
-  JXL_EXPECT_OK(Roundtrip(&io, cparams, {}, &io_out, _, &compressed_size));
+  JXL_EXPECT_OK(Roundtrip(&io, cparams, dparams, &io_out, _, &compressed_size));
   EXPECT_LE(compressed_size, 6800u);
   EXPECT_SLIGHTLY_BELOW(
       ButteraugliDistance(io.frames, io_out.frames, ButteraugliParams(),
@@ -157,6 +158,7 @@ TEST(ModularTest, RoundtripLossyDeltaPaletteWP) {
   cparams.palette_colors = 0;
   // TODO(jon): this is currently ignored, and Avg4 is always used instead
   cparams.options.predictor = jxl::Predictor::Weighted;
+  extras::JXLDecompressParams dparams;
 
   CodecInOut io_out{memory_manager};
 
@@ -165,7 +167,7 @@ TEST(ModularTest, RoundtripLossyDeltaPaletteWP) {
   ASSERT_TRUE(io.ShrinkTo(300, 100));
 
   size_t compressed_size;
-  JXL_EXPECT_OK(Roundtrip(&io, cparams, {}, &io_out, _, &compressed_size));
+  JXL_EXPECT_OK(Roundtrip(&io, cparams, dparams, &io_out, _, &compressed_size));
   EXPECT_LE(compressed_size, 6500u);
   EXPECT_SLIGHTLY_BELOW(
       ButteraugliDistance(io.frames, io_out.frames, ButteraugliParams(),
@@ -182,6 +184,7 @@ TEST(ModularTest, RoundtripLossy) {
   cparams.modular_mode = true;
   cparams.butteraugli_distance = 2.f;
   cparams.SetCms(*JxlGetDefaultCms());
+  extras::JXLDecompressParams dparams;
 
   CodecInOut io_out{memory_manager};
 
@@ -189,7 +192,7 @@ TEST(ModularTest, RoundtripLossy) {
   ASSERT_TRUE(SetFromBytes(Bytes(orig), &io));
 
   size_t compressed_size;
-  JXL_EXPECT_OK(Roundtrip(&io, cparams, {}, &io_out, _, &compressed_size));
+  JXL_EXPECT_OK(Roundtrip(&io, cparams, dparams, &io_out, _, &compressed_size));
   EXPECT_LE(compressed_size, 30000u);
   EXPECT_SLIGHTLY_BELOW(
       ButteraugliDistance(io.frames, io_out.frames, ButteraugliParams(),
@@ -205,6 +208,7 @@ TEST(ModularTest, RoundtripLossy16) {
   CompressParams cparams;
   cparams.modular_mode = true;
   cparams.butteraugli_distance = 2.f;
+  extras::JXLDecompressParams dparams;
 
   CodecInOut io_out{memory_manager};
 
@@ -217,7 +221,7 @@ TEST(ModularTest, RoundtripLossy16) {
   io.metadata.m.color_encoding = ColorEncoding::SRGB();
 
   size_t compressed_size;
-  JXL_EXPECT_OK(Roundtrip(&io, cparams, {}, &io_out, _, &compressed_size));
+  JXL_EXPECT_OK(Roundtrip(&io, cparams, dparams, &io_out, _, &compressed_size));
   EXPECT_LE(compressed_size, 300u);
   EXPECT_SLIGHTLY_BELOW(
       ButteraugliDistance(io.frames, io_out.frames, ButteraugliParams(),
@@ -355,9 +359,10 @@ TEST_P(ModularTestParam, RoundtripLossless) {
   cparams.options.predictor = {Predictor::Zero};
   cparams.speed_tier = SpeedTier::kThunder;
   cparams.responsive = responsive;
+  extras::JXLDecompressParams dparams;
   CodecInOut io2{memory_manager};
   size_t compressed_size;
-  JXL_EXPECT_OK(Roundtrip(&io, cparams, {}, &io2, _, &compressed_size));
+  JXL_EXPECT_OK(Roundtrip(&io, cparams, dparams, &io2, _, &compressed_size));
   EXPECT_LE(compressed_size, bitdepth * xsize * ysize / 3.0 * 1.1);
   EXPECT_LE(0, ComputeDistance2(io.Main(), io2.Main(), *JxlGetDefaultCms()));
   size_t different = 0;
@@ -411,10 +416,11 @@ TEST(ModularTest, RoundtripLosslessCustomFloat) {
   cparams.options.predictor = {Predictor::Zero};
   cparams.speed_tier = SpeedTier::kThunder;
   cparams.decoding_speed_tier = 2;
+  extras::JXLDecompressParams dparams;
 
   CodecInOut io2{memory_manager};
   size_t compressed_size;
-  JXL_EXPECT_OK(Roundtrip(&io, cparams, {}, &io2, _, &compressed_size));
+  JXL_EXPECT_OK(Roundtrip(&io, cparams, dparams, &io2, _, &compressed_size));
   EXPECT_LE(compressed_size, 23000u);
   JXL_EXPECT_OK(SamePixels(*io.Main().color(), *io2.Main().color(), _));
 }
