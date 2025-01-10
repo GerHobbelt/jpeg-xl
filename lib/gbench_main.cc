@@ -5,6 +5,8 @@
 
 #include "benchmark/benchmark.h"
 
+void RegisterDctBenchmarks(void);
+
 #ifndef BUILD_MONOLITHIC
 
 BENCHMARK_MAIN();
@@ -21,6 +23,7 @@ extern "C" int gbench_benchmark_main(int argc, const char **argv)
       argc = 1;                                                         
       argv = &args_default;                                             
     }                                                                   
+  RegisterDctBenchmarks();
     ::benchmark::Initialize(&argc, argv);                               
     if (::benchmark::ReportUnrecognizedArguments(argc, argv))
 		return 1; 
