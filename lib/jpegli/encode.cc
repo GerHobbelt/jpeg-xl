@@ -881,7 +881,7 @@ void jpegli_set_linear_quality(j_compress_ptr cinfo, int scale_factor,
 #if JPEG_LIB_VERSION >= 70
 void jpegli_default_qtables(j_compress_ptr cinfo, boolean force_baseline) {
   CheckState(cinfo, jpegli::kEncStart);
-  cinfo->master->force_baseline = force_baseline;
+  cinfo->master->force_baseline = !!force_baseline;
   float distances[NUM_QUANT_TBLS];
   for (int i = 0; i < NUM_QUANT_TBLS; ++i) {
     distances[i] = jpegli::LinearQualityToDistance(cinfo->q_scale_factor[i]);

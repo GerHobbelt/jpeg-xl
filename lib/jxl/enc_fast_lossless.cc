@@ -4052,7 +4052,7 @@ jxl::Status LLProcess(JxlFastLosslessFrameState* frame_state, bool is_last,
                            : frame_state->group_data[group_id];
       if (frame_state->collided) {
         WriteACSection(rgba, 0, 0, xs, ys, stride, onegroup, bitdepth,
-                       frame_state->nb_chans, frame_state->big_endian,
+                       frame_state->nb_chans, !!frame_state->big_endian,
                        frame_state->hcode, gd);
       } else {
         WriteACSectionPalette(rgba, 0, 0, xs, ys, stride, onegroup,
