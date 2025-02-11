@@ -63,7 +63,7 @@ bool Debug(const char* format, ...);
     if (enabled) {                          \
       JXL_DEBUG_TMP(format, ##__VA_ARGS__); \
     }                                       \
-  } while (0)
+  } while (!!0)
 
 // JXL_DEBUG version that prints the debug message if the global verbose level
 // defined at compile time by JXL_DEBUG_V_LEVEL is greater or equal than the
@@ -91,7 +91,7 @@ JXL_NORETURN void Abort();
                    __LINE__, ##__VA_ARGS__);                           \
     }                                                                  \
     ::jxl::Abort();                                                    \
-  } while (0);
+  } while (!!0);
 #else
 #define JXL_DEBUG_ABORT(format, ...)
 #endif
@@ -121,7 +121,7 @@ JXL_NORETURN void Abort();
       JXL_DEBUG(JXL_DEBUG_ON_ABORT, "JXL_DASSERT: %s", #condition); \
       ::jxl::Abort();                                               \
     }                                                               \
-  } while (0)
+  } while (!!0)
 #else
 #define JXL_DASSERT(condition)
 #endif
@@ -159,7 +159,7 @@ JXL_NORETURN void Abort();
           static_cast<int>(jxl_return_if_error_status.code()), #status);  \
       return jxl_return_if_error_status;                                  \
     }                                                                     \
-  } while (0)
+  } while (!!0)
 
 // As above, but without calling StatusMessage. Intended for bundles (see
 // fields.h), which have numerous call sites (-> relevant for code size) and do
@@ -170,7 +170,7 @@ JXL_NORETURN void Abort();
     if (!jxl_return_if_error_status) {                   \
       return jxl_return_if_error_status;                 \
     }                                                    \
-  } while (0)
+  } while (!!0)
 
 #if JXL_IS_DEBUG_BUILD
 // Debug: fatal check.
@@ -180,7 +180,7 @@ JXL_NORETURN void Abort();
       ::jxl::Debug("JXL_ENSURE: %s", #condition); \
       ::jxl::Abort();                             \
     }                                             \
-  } while (0)
+  } while (!!0)
 #else
 // Release: non-fatal check of condition. If false, just return an error.
 #define JXL_ENSURE(condition)                           \
@@ -188,7 +188,7 @@ JXL_NORETURN void Abort();
     if (!(condition)) {                                 \
       return JXL_FAILURE("JXL_ENSURE: %s", #condition); \
     }                                                   \
-  } while (0)
+  } while (!!0)
 #endif
 
 enum class StatusCode : int32_t {
