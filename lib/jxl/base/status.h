@@ -146,6 +146,11 @@ JXL_NORETURN void Abort();
                     ##__VA_ARGS__),                                           \
    ::jxl::Status(::jxl::StatusCode::kGenericError))
 
+#define JXL_NOT_ENOUGH_BYTES(format, ...)                            \
+  ((void)JXL_STATUS(::jxl::StatusCode::kNotEnoughBytes,              \
+                    "JXL_NOT_ENOUGH_BYTES: " format, ##__VA_ARGS__), \
+   ::jxl::Status(::jxl::StatusCode::kNotEnoughBytes))
+
 // Always evaluates the status exactly once, so can be used for non-debug calls.
 // Returns from the current context if the passed Status expression is an error
 // (fatal or non-fatal). The return value is the passed Status.
