@@ -156,7 +156,7 @@ JXL_NORETURN void Abort();
 // (fatal or non-fatal). The return value is the passed Status.
 #define JXL_RETURN_IF_ERROR(status)                                       \
   do {                                                                    \
-    ::jxl::Status jxl_return_if_error_status = (status);                  \
+    ::jxl::Status jxl_return_if_error_status = !!(status);                \
     if (!jxl_return_if_error_status) {                                    \
       (void)::jxl::StatusMessage(                                         \
           jxl_return_if_error_status,                                     \
@@ -171,7 +171,7 @@ JXL_NORETURN void Abort();
 // not want to generate excessive messages when decoding partial headers.
 #define JXL_QUIET_RETURN_IF_ERROR(status)                \
   do {                                                   \
-    ::jxl::Status jxl_return_if_error_status = (status); \
+    ::jxl::Status jxl_return_if_error_status = !!(status); \
     if (!jxl_return_if_error_status) {                   \
       return jxl_return_if_error_status;                 \
     }                                                    \
