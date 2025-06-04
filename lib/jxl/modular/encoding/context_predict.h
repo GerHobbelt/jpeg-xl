@@ -322,18 +322,18 @@ class MATreeLookup {
   JXL_INLINE LookupResult Lookup(const Properties &properties) const {
     uint32_t pos = 0;
     while (true) {
-#define TRAVERSE_THE_TREE                                                      \
-  {                                                                            \
-    const FlatDecisionNode &node = nodes_[pos];                                \
-    if (node.property0 < 0) {                                                  \
-      return {node.childID, node.predictor, node.predictor_offset,             \
-              node.multiplier};                                                \
-    }                                                                          \
-    bool p0 = properties[node.property0] <= node.splitval0;                    \
-    uint32_t off0 = properties[node.properties[0]] <= node.splitvals[0];       \
-		/* fix warning C4806: '|': unsafe operation: no value of type 'bool' promoted to type 'int' can equal the given constant */ \
-    uint32_t off1 = 2 | uint32_t(properties[node.properties[1]] <= node.splitvals[1]); \
-    pos = node.childID + (p0 ? off1 : off0);                                   \
+#define TRAVERSE_THE_TREE                                                \
+  {                                                                      \
+    const FlatDecisionNode &node = nodes_[pos];                          \
+    if (node.property0 < 0) {                                            \
+      return {node.childID, node.predictor, node.predictor_offset,       \
+              node.multiplier};                                          \
+    }                                                                    \
+    bool p0 = properties[node.property0] <= node.splitval0;              \
+    uint32_t off0 = properties[node.properties[0]] <= node.splitvals[0]; \
+	/* fix warning C4806: '|': unsafe operation: no value of type 'bool' promoted to type 'int' can equal the given constant */ \
+    uint32_t off1 = 2 | uint32_t{properties[node.properties[1]] <= node.splitvals[1]}; \
+    pos = node.childID + (p0 ? off1 : off0);                             \
   }
 
       TRAVERSE_THE_TREE;

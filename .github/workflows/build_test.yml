@@ -124,23 +124,23 @@ jobs:
             cc: gcc
             cxx: g++
           - name: release:gcc-old
-            os: ubuntu-22.04
+            os: ubuntu-24.04
             mode: release
             cc: gcc
             cxx: g++
           - name: release:gcc-old-old
-            os: ubuntu-20.04
+            os: ubuntu-22.04
             mode: release
             cc: gcc
             cxx: g++
           # Builds with old clang in release mode
           - name: release:clang-old
-            os: ubuntu-22.04
+            os: ubuntu-24.04
             mode: release
             cc: clang
             cxx: clang++
           - name: release:clang-old-old
-            os: ubuntu-20.04
+            os: ubuntu-22.04
             mode: release
             cc: clang
             cxx: clang++
@@ -330,7 +330,7 @@ jobs:
 
     - name: Coverage upload to Codecov
       if: env.WILL_COV == 'true'
-      uses: codecov/codecov-action@0565863a31f2c772f9f0395002a31e3f06189574 # v5.4.0
+      uses: codecov/codecov-action@ad3126e916f78f00edff4ed0317cf185271ccc2d # v5.4.2
       with:
         flags: unittests
         files: build/coverage.xml
