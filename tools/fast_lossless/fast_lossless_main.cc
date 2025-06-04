@@ -73,12 +73,12 @@ int main(int argc, const char** argv) {
         fun(opaque, i);
       }
     } else {
-      std::atomic<int> task{0};
+      std::atomic<uint32_t> task{0};
       std::vector<std::thread> threads;
       for (size_t i = 0; i < num_threads; i++) {
         threads.push_back(std::thread([count, opaque, fun, &task]() {
           while (true) {
-            int t = task++;
+            uint32_t t = task++;
             if (t >= count) break;
             fun(opaque, t);
           }
