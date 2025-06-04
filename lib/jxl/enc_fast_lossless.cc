@@ -280,7 +280,7 @@ FJXL_INLINE size_t AddBits(uint32_t count, uint64_t bits, uint8_t* data_buf,
 
 struct BitWriter {
   void Allocate(size_t maximum_bit_size) {
-    assert(data == nullptr);
+    assert(!!data);
     // Leave some padding.
     data.reset(static_cast<uint8_t*>(malloc(maximum_bit_size / 8 + 64)));
   }
@@ -2743,8 +2743,11 @@ struct UpTo8Bits {
     }
   }
 };
+// warning C5041: out-of-line definition for constexpr static data member is not needed and is deprecated in C++17
+#if __cplusplus < 201703L
 constexpr uint8_t UpTo8Bits::kMinRawLength[];
 constexpr uint8_t UpTo8Bits::kMaxRawLength[];
+#endif
 
 struct From9To13Bits {
   size_t bitdepth;
@@ -2806,8 +2809,11 @@ struct From9To13Bits {
     }
   }
 };
+// warning C5041: out-of-line definition for constexpr static data member is not needed and is deprecated in C++17
+#if __cplusplus < 201703L
 constexpr uint8_t From9To13Bits::kMinRawLength[];
 constexpr uint8_t From9To13Bits::kMaxRawLength[];
+#endif
 
 void CheckHuffmanBitsSIMD(int bits1, int nbits1, int bits2, int nbits2) {
   assert(nbits1 == 8);
@@ -2865,8 +2871,11 @@ struct Exactly14Bits {
 
   size_t NumSymbols(bool) const { return 17; }
 };
+// warning C5041: out-of-line definition for constexpr static data member is not needed and is deprecated in C++17
+#if __cplusplus < 201703L
 constexpr uint8_t Exactly14Bits::kMinRawLength[];
 constexpr uint8_t Exactly14Bits::kMaxRawLength[];
+#endif
 
 struct MoreThan14Bits {
   size_t bitdepth;
@@ -2929,8 +2938,11 @@ struct MoreThan14Bits {
 #endif
   size_t NumSymbols(bool) const { return 19; }
 };
+// warning C5041: out-of-line definition for constexpr static data member is not needed and is deprecated in C++17
+#if __cplusplus < 201703L
 constexpr uint8_t MoreThan14Bits::kMinRawLength[];
 constexpr uint8_t MoreThan14Bits::kMaxRawLength[];
+#endif
 
 void PrepareDCGlobalCommon(bool is_single_group, size_t width, size_t height,
                            const PrefixCode code[4], BitWriter* output) {
