@@ -25,6 +25,7 @@
 #include "lib/jxl/dec_bit_reader.h"
 #include "lib/jxl/dec_cache.h"
 #include "lib/jxl/dec_modular.h"
+#include "lib/jxl/frame_dimensions.h"
 #include "lib/jxl/frame_header.h"
 #include "lib/jxl/image_bundle.h"
 #include "lib/jxl/image_metadata.h"
@@ -242,7 +243,7 @@ class FrameDecoder {
   }
 
  private:
-  typedef std::array<BitReader*, kMaxNumPasses> PassesReaders;
+  using PassesReaders = std::array<BitReader*, kMaxNumPasses>;
 
   Status ProcessDCGlobal(BitReader* br);
   Status ProcessDCGroup(size_t dc_group_id, BitReader* br);

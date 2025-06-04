@@ -34,6 +34,7 @@
 #include "lib/jxl/base/data_parallel.h"
 #include "lib/jxl/base/span.h"
 #include "lib/jxl/base/status.h"
+#include "lib/jxl/butteraugli/butteraugli.h"
 #include "lib/jxl/color_encoding_internal.h"
 #include "lib/jxl/common.h"  // JXL_HIGH_PRECISION
 #include "lib/jxl/enc_params.h"
@@ -41,7 +42,6 @@
 #include "lib/jxl/image.h"
 #include "lib/jxl/image_bundle.h"
 #include "lib/jxl/image_metadata.h"
-#include "lib/jxl/jpeg/enc_jpeg_data.h"
 #include "lib/jxl/test_image.h"
 #include "lib/jxl/test_memory_manager.h"
 #include "lib/jxl/test_utils.h"
@@ -1082,7 +1082,7 @@ JXL_SLOW_TEST(JxlTest, RoundtripLossless8) {
 
   PackedPixelFile ppf_out;
   EXPECT_EQ(Roundtrip(t.ppf(), cparams, dparams, pool.get(), &ppf_out),
-            222714u);
+            222547u);
   EXPECT_EQ(ComputeDistance2(t.ppf(), ppf_out), 0.0);
 }
 
@@ -1161,7 +1161,7 @@ TEST(JxlTest, RoundtripLossless8Alpha) {
   dparams.accepted_formats.push_back(t.ppf().frames[0].color.format);
 
   PackedPixelFile ppf_out;
-  EXPECT_EQ(Roundtrip(t.ppf(), cparams, dparams, pool, &ppf_out), 250517u);
+  EXPECT_EQ(Roundtrip(t.ppf(), cparams, dparams, pool, &ppf_out), 250392u);
   EXPECT_EQ(ComputeDistance2(t.ppf(), ppf_out), 0.0);
   EXPECT_EQ(ppf_out.info.alpha_bits, 8);
   EXPECT_TRUE(test::SameAlpha(t.ppf(), ppf_out));
@@ -1261,13 +1261,13 @@ TEST(JxlTest, RoundtripDots) {
   JXLCompressParams cparams;
   cparams.AddOption(JXL_ENC_FRAME_SETTING_EFFORT, 7);  // kSquirrel
   cparams.AddOption(JXL_ENC_FRAME_SETTING_DOTS, 1);
-  cparams.distance = 0.04;
+  cparams.distance = 0.05;
   extras::JXLDecompressParams dparams;
 
   PackedPixelFile ppf_out;
-  EXPECT_NEAR(Roundtrip(t.ppf(), cparams, dparams, pool, &ppf_out), 276166,
-              4000);
-  EXPECT_SLIGHTLY_BELOW(ButteraugliDistance(t.ppf(), ppf_out), 0.14);
+  EXPECT_NEAR(Roundtrip(t.ppf(), cparams, dparams, pool, &ppf_out), 245151,
+              3000);
+  EXPECT_SLIGHTLY_BELOW(ButteraugliDistance(t.ppf(), ppf_out), 0.165);
 }
 
 TEST(JxlTest, RoundtripDisablePerceptual) {
@@ -1335,7 +1335,7 @@ TEST(JxlTest, RoundtripLossless8Gray) {
   dparams.accepted_formats.push_back(t.ppf().frames[0].color.format);
 
   PackedPixelFile ppf_out;
-  EXPECT_EQ(Roundtrip(t.ppf(), cparams, dparams, pool, &ppf_out), 92600u);
+  EXPECT_EQ(Roundtrip(t.ppf(), cparams, dparams, pool, &ppf_out), 92588u);
   EXPECT_EQ(ComputeDistance2(t.ppf(), ppf_out), 0.0);
   EXPECT_EQ(ppf_out.color_encoding.color_space, JXL_COLOR_SPACE_GRAY);
   EXPECT_EQ(ppf_out.info.bits_per_sample, 8);
@@ -1708,8 +1708,8 @@ TEST(JxlTest, RoundtripProgressive) {
 
   PackedPixelFile ppf_out;
   EXPECT_NEAR(Roundtrip(t.ppf(), cparams, dparams, pool.get(), &ppf_out), 71544,
-              750);
-  EXPECT_SLIGHTLY_BELOW(ButteraugliDistance(t.ppf(), ppf_out), 1.4);
+              500);
+  EXPECT_SLIGHTLY_BELOW(ButteraugliDistance(t.ppf(), ppf_out), 1.3);
 }
 
 TEST(JxlTest, RoundtripProgressiveLevel2Slow) {
