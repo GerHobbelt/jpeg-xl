@@ -42,7 +42,7 @@ void jpeg_stdio_src(j_decompress_ptr cinfo, FILE *infile) {
 }
 
 void jpeg_mem_src(j_decompress_ptr cinfo, const unsigned char *inbuffer,
-                  unsigned long insize /* NOLINT */) {
+                  size_t insize /* NOLINT */) {
   jpegli_mem_src(cinfo, inbuffer, insize);
 }
 
