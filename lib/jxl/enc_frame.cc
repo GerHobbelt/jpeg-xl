@@ -12,7 +12,6 @@
 
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -603,7 +602,7 @@ struct PixelStatsForChromacityAdjustment {
         xmax = std::max(xmax, std::abs(diff_b - diff_prev));
         ymax = std::max(ymax, std::abs(diff_b - diff_prev_row));
         if (exposed_b >= 0) {
-          exposed_b *= fabs(cur_b - prev) + fabs(cur_b - prev_row);
+          exposed_b *= std::abs(cur_b - prev) + std::abs(cur_b - prev_row);
           eb = std::max(eb, exposed_b);
         }
       }
@@ -1039,7 +1038,7 @@ Status ComputeJPEGTranscodingData(const jpeg::JPEGData& jpeg_data,
     int num_thresholds = (CeilLog2Nonzero(total_dc[i]) - 12) / 2;
     // up to 3 buckets per channel:
     // dark/medium/bright, yellow/unsat/blue, green/unsat/red
-    num_thresholds = std::min(std::max(num_thresholds, 0), 2);
+    num_thresholds = jxl::Clamp1(num_thresholds, 0, 2);
     size_t cumsum = 0;
     size_t cut = total_dc[i] / (num_thresholds + 1);
     for (int j = 0; j < 2048; j++) {
@@ -1778,6 +1777,11 @@ bool CanDoStreamingEncoding(const CompressParams& cparams,
     return false;
   }
   if (cparams.progressive_dc != 0 || frame_info.dc_level != 0) {
+    return false;
+  }
+  if (cparams.custom_progressive_mode ||
+      cparams.qprogressive_mode == Override::kOn ||
+      cparams.progressive_mode == Override::kOn) {
     return false;
   }
   if (cparams.resampling != 1 || cparams.ec_resampling != 1) {
