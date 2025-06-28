@@ -14,6 +14,7 @@ import PackageDescription
 
 let package = Package(
   name: "swift-jpeg-xl",
+  defaultLocalization: "en",
   products: [
     .library(name: "CJPEGXL", targets: ["CJPEGXL"])
   ],
