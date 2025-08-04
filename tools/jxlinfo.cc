@@ -442,7 +442,7 @@ static int PrintBasicInfo(FILE* file, int verbose) {
           uint8_t* icc = nullptr;
           size_t icc_size = 0;
           JxlMemoryManager manager = {
-              .opaque = nullptr, .alloc = nullptr, .free = nullptr};
+              .opaque = nullptr, ._alloc = nullptr, ._free = nullptr};
           if (gain_map_bundle.alt_icc_size > 0 &&
               !JxlICCProfileDecode(&manager, gain_map_bundle.alt_icc,
                                    gain_map_bundle.alt_icc_size, &icc,
