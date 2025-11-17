@@ -510,7 +510,7 @@ JXL_INLINE PredictionResult Predict(
   // We start in position 3 because of 2 static properties + y.
   size_t offset = 3;
   constexpr bool compute_properties =
-      mode & kUseTree || mode & kForceComputeProperties;
+      !!(mode & kUseTree) || !!(mode & kForceComputeProperties);
   constexpr bool nec = !!(mode & kNoEdgeCases);
   pixel_type_w left = (nec || x ? pp[-1] : (y ? pp[-onerow] : 0));
   pixel_type_w top = (nec || y ? pp[-onerow] : left);
