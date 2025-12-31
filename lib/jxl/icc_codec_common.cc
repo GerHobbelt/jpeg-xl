@@ -99,6 +99,12 @@ const std::array<uint8_t, kICCHeaderSize> kIccInitialHeaderPrediction = {
     0,   0,   0,   0,   0,   0,   0,   0,   0, 0, 0, 0, 0,   0,   0,   0,
 };
 
+// fix warning C4686: 'jxl::ICCInitialHeaderPrediction': possible change in
+// behavior, change in UDT return calling convention as per
+// https://stackoverflow.com/questions/74551233/possible-change-in-behavior-change-in-udt-return-calling-convention
+template
+std::array<uint8_t, kICCHeaderSize>;
+
 std::array<uint8_t, kICCHeaderSize> ICCInitialHeaderPrediction(uint32_t size) {
   std::array<uint8_t, kICCHeaderSize> copy(kIccInitialHeaderPrediction);
   StoreBE32(size, copy.data());
